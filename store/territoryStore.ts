@@ -43,9 +43,16 @@ export const useTerritoryStore = create<TerritoryState>((set, get) => ({
   selectedResidents: [],
 
   addTerritory: (territory) =>
-    set((state) => ({
-      territories: [...state.territories, territory],
-    })),
+    set((state) => {
+      // Check if territory already exists to prevent duplicates
+      const existingTerritory = state.territories.find(t => t.id === territory.id)
+      if (existingTerritory) {
+        return state // Return unchanged state if territory already exists
+      }
+      return {
+        territories: [...state.territories, territory],
+      }
+    }),
 
   updateTerritory: (id, updates) =>
     set((state) => ({

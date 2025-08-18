@@ -3,7 +3,7 @@
 import { RoleAwareHeader } from "@/components/role-aware-header"
 import { RoleAwareNavigation } from "@/components/role-aware-navigation"
 
-export default function DashboardLayout({
+export default function UserLayout({
   children,
 }: {
   children: React.ReactNode

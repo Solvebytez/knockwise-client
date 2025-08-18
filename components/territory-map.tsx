@@ -93,6 +93,7 @@ export function TerritoryMap() {
   const [forceRerender, setForceRerender] = useState(0)
   const [isDetectingResidents, setIsDetectingResidents] = useState(false)
   const [isSavingTerritory, setIsSavingTerritory] = useState(false)
+  const [isAssigningTerritory, setIsAssigningTerritory] = useState(false)
   const [assignmentType, setAssignmentType] = useState<"team" | "individual">("team")
   const [assignmentSearchQuery, setAssignmentSearchQuery] = useState("")
   const [assignmentSearchResults, setAssignmentSearchResults] = useState<any[]>([])
@@ -940,6 +941,7 @@ export function TerritoryMap() {
 
   const handleAssignTerritory = async () => {
     if (selectedTerritory && selectedAssignment && assignedDate) {
+      setIsAssigningTerritory(true)
       try {
         console.log('Assigning territory:', {
           territory: selectedTerritory.name,
@@ -998,6 +1000,8 @@ export function TerritoryMap() {
         }
         
         toast.error(error instanceof Error ? error.message : 'Unknown error occurred');
+      } finally {
+        setIsAssigningTerritory(false)
       }
     } else {
       const missingFields = [];
@@ -1064,7 +1068,7 @@ export function TerritoryMap() {
 
   // Load territories from backend on component mount
   useEffect(() => {
-    if (territoriesLoaded) return // Prevent multiple loads
+    if (territoriesLoaded || isLoadingTerritories) return // Prevent multiple loads
     
     const loadTerritories = async () => {
       setIsLoadingTerritories(true)
@@ -1084,8 +1088,9 @@ export function TerritoryMap() {
           }
         })
         
-        // Clear existing residents first to prevent duplicates
+        // Clear existing residents and territories first to prevent duplicates
         useTerritoryStore.getState().clearAllResidents()
+        useTerritoryStore.getState().clearAllTerritories()
         
         // Add all unique residents to the store
         allResidents.forEach((resident: any) => {
@@ -1110,6 +1115,7 @@ export function TerritoryMap() {
         console.log('Total unique residents found:', allResidents.size)
         
         // Convert backend data to frontend format
+        console.log('Processing territories data:', territoriesData.length, 'zones')
         territoriesData.forEach((zone: any) => {
           // Get resident IDs for this territory
           const residentIds: string[] = []
@@ -1132,6 +1138,7 @@ export function TerritoryMap() {
             createdAt: new Date(zone.createdAt),
             updatedAt: new Date(zone.updatedAt),
           }
+          console.log('Adding territory:', territory.id, territory.name)
           addTerritory(territory)
         })
         setTerritoriesLoaded(true)
@@ -2004,9 +2011,16 @@ export function TerritoryMap() {
                   <Button
                     onClick={handleAssignTerritory}
                     className="flex-1 bg-[#FFC107] hover:bg-[#FFC107]/90 text-black font-medium"
-                    disabled={!selectedAssignment || !assignedDate}
+                    disabled={!selectedAssignment || !assignedDate || isAssigningTerritory}
                   >
-                    Assign Territory
+                    {isAssigningTerritory ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Assigning...
+                      </>
+                    ) : (
+                      "Assign Territory"
+                    )}
                   </Button>
                   <Button
                     onClick={() => {
@@ -2019,6 +2033,7 @@ export function TerritoryMap() {
                     }}
                     variant="outline"
                     className="px-4 bg-transparent border-gray-300 hover:bg-gray-50"
+                    disabled={isAssigningTerritory}
                   >
                     Skip for Now
                   </Button>
@@ -2034,6 +2049,7 @@ export function TerritoryMap() {
                     }}
                     variant="outline"
                     className="px-4 bg-transparent border-gray-300 hover:bg-gray-50"
+                    disabled={isAssigningTerritory}
                   >
                     Clear Areas
                   </Button>

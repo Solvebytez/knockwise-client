@@ -33,7 +33,7 @@ interface AuthStore {
         fetchUser: async () => {
             set({ isLoading: true });
             try {
-              const { data } = await apiInstance.get('/get-user', {
+              const { data } = await apiInstance.get('/users/my-profile', {
                 withCredentials: true,
               });
               set({ user: data.user, isLoading: false });

@@ -27,7 +27,7 @@ export default function LoginPage() {
     setError,
   } = useForm<LoginFormData>({
     defaultValues: {
-      email: " subadmin@knockwise.io",
+      email: "agent@knockwise.io",
       password: "Admin@12345",
     },
   })
@@ -53,18 +53,33 @@ export default function LoginPage() {
     },
     onSuccess: (data: any) => {
       console.log("data", data.data.user)
-      setUser(data.data.user as User)
-      router.push("/dashboard")
+      const userData = data.data.user as User
+      setUser(userData)
+      
+      // Redirect based on user role
+      if (userData.role === 'AGENT') {
+        router.push("/agent")
+      } else {
+        router.push("/dashboard")
+      }
     },
   })
 
   const onSubmit = async (data: LoginFormData) => {
-    signInMutation.mutate({
+    console.log('Form data being submitted:', data)
+    console.log('Selected user type:', selectedUserType)
+    
+    const submitData = {
       ...data,
       userType: selectedUserType,
-    },{
+    }
+    
+    console.log('Final submit data:', submitData)
+    
+    signInMutation.mutate(submitData, {
       onError: (error: any) => {
-        setError("root", { message: error.response.data.message })
+        console.error('Login error:', error)
+        setError("root", { message: error.response?.data?.message || 'Login failed' })
       }
     })
   }
