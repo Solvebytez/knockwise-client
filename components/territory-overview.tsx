@@ -113,12 +113,12 @@ interface Territory {
     effectiveTo?: string
     status: string
   }
-  status: 'ACTIVE' | 'INACTIVE' | 'DRAFT'
+  status: 'ACTIVE' | 'INACTIVE' | 'DRAFT' | 'SCHEDULED'
   totalResidents?: number
   activeResidents?: number
   completionRate?: number
   averageKnocks?: number
-  lastActivity?: string
+  lastActivity?: string | null
   createdAt: string
   updatedAt: string
   // Additional suggested fields
@@ -153,6 +153,8 @@ interface Territory {
 interface TerritoryStats {
   totalTerritories: number
   activeTerritories: number
+  scheduledTerritories: number
+  draftTerritories: number
   assignedTerritories: number
   unassignedTerritories: number
   totalResidents: number
@@ -200,29 +202,35 @@ interface TerritoryStats {
 const mockTerritories: Territory[] = [
   {
     _id: '1',
-    name: 'Downtown Dallas',
-    description: 'High-value residential area with premium properties',
+    name: 'individual 2',
+    description: 'Individual assignment territory',
     boundary: {
       type: 'Polygon',
       coordinates: [[[-96.797, 32.7767], [-96.787, 32.7867], [-96.807, 32.7667], [-96.797, 32.7767]]]
     },
     assignedAgentId: {
       _id: 'agent1',
-      name: 'John Smith',
-      email: 'john.smith@knockwise.com'
+      name: 'individual',
+      email: 'agn@example.com'
     },
-    teamId: {
-      _id: 'team1',
-      name: 'Team Alpha'
+    currentAssignment: {
+      _id: 'assignment1',
+      agentId: {
+        _id: 'agent1',
+        name: 'individual',
+        email: 'agn@example.com'
+      },
+      effectiveFrom: '2025-08-21T00:00:00.000Z',
+      status: 'PENDING'
     },
-    status: 'ACTIVE',
-    totalResidents: 45,
-    activeResidents: 38,
-    completionRate: 84,
-    averageKnocks: 67,
-    lastActivity: '2024-01-15T10:30:00.000Z',
-    createdAt: '2024-01-01T00:00:00.000Z',
-    updatedAt: '2024-01-15T10:30:00.000Z',
+    status: 'SCHEDULED',
+    totalResidents: 10,
+    activeResidents: 0,
+    completionRate: 0,
+    averageKnocks: 0,
+    lastActivity: '2025-08-18T00:00:00.000Z',
+    createdAt: '2025-08-18T00:00:00.000Z',
+    updatedAt: '2025-08-18T00:00:00.000Z',
     // Enhanced data
     area: 850000,
     populationDensity: 3200,
@@ -253,131 +261,114 @@ const mockTerritories: Territory[] = [
   },
   {
     _id: '2',
-    name: 'North Dallas District',
-    description: 'Suburban residential area with family homes',
+    name: 'zone for individual',
+    description: 'Individual assignment zone',
     boundary: {
       type: 'Polygon',
       coordinates: [[[-96.797, 32.8167], [-96.787, 32.8267], [-96.807, 32.8067], [-96.797, 32.8167]]]
     },
     assignedAgentId: {
       _id: 'agent2',
-      name: 'Sarah Johnson',
-      email: 'sarah.johnson@knockwise.com'
+      name: 'individual',
+      email: 'agn@example.com'
     },
-    teamId: {
-      _id: 'team2',
-      name: 'Team Beta'
+    currentAssignment: {
+      _id: 'assignment2',
+      agentId: {
+        _id: 'agent2',
+        name: 'individual',
+        email: 'agn@example.com'
+      },
+      effectiveFrom: '2025-08-19T00:00:00.000Z',
+      status: 'PENDING'
     },
-    status: 'ACTIVE',
-    totalResidents: 32,
-    activeResidents: 28,
-    completionRate: 87,
-    averageKnocks: 72,
-    lastActivity: '2024-01-14T15:45:00.000Z',
-    createdAt: '2024-01-02T00:00:00.000Z',
-    updatedAt: '2024-01-14T15:45:00.000Z'
+    status: 'SCHEDULED',
+    totalResidents: 15,
+    activeResidents: 0,
+    completionRate: 0,
+    averageKnocks: 0,
+    lastActivity: '2025-08-18T00:00:00.000Z',
+    createdAt: '2025-08-18T00:00:00.000Z',
+    updatedAt: '2025-08-18T00:00:00.000Z'
   },
   {
     _id: '3',
-    name: 'East Dallas Corridor',
-    description: 'Mixed commercial and residential area',
+    name: 'zone 2',
+    description: 'Team assignment zone',
     boundary: {
       type: 'Polygon',
       coordinates: [[[-96.757, 32.7767], [-96.747, 32.7867], [-96.767, 32.7667], [-96.757, 32.7767]]]
     },
-    assignedAgentId: {
-      _id: 'agent3',
-      name: 'Mike Wilson',
-      email: 'mike.wilson@knockwise.com'
-    },
     teamId: {
       _id: 'team1',
-      name: 'Team Alpha'
+      name: 'team 1'
     },
-    status: 'ACTIVE',
-    totalResidents: 28,
-    activeResidents: 22,
-    completionRate: 78,
-    averageKnocks: 58,
-    lastActivity: '2024-01-13T09:20:00.000Z',
-    createdAt: '2024-01-03T00:00:00.000Z',
-    updatedAt: '2024-01-13T09:20:00.000Z'
+    currentAssignment: {
+      _id: 'assignment3',
+      teamId: {
+        _id: 'team1',
+        name: 'team 1'
+      },
+      effectiveFrom: '2025-08-21T00:00:00.000Z',
+      status: 'PENDING'
+    },
+    status: 'SCHEDULED',
+    totalResidents: 25,
+    activeResidents: 0,
+    completionRate: 0,
+    averageKnocks: 0,
+    lastActivity: '2025-08-18T00:00:00.000Z',
+    createdAt: '2025-08-18T00:00:00.000Z',
+    updatedAt: '2025-08-18T00:00:00.000Z'
   },
   {
     _id: '4',
-    name: 'West Dallas Industrial',
-    description: 'Industrial area with limited residential properties',
+    name: 'zone 1',
+    description: 'Team assignment zone',
     boundary: {
       type: 'Polygon',
       coordinates: [[[-96.837, 32.7767], [-96.847, 32.7667], [-96.827, 32.7867], [-96.837, 32.7767]]]
     },
-    status: 'INACTIVE',
-    totalResidents: 12,
-    activeResidents: 8,
-    completionRate: 67,
-    averageKnocks: 45,
-    lastActivity: '2024-01-10T14:15:00.000Z',
-    createdAt: '2024-01-04T00:00:00.000Z',
-    updatedAt: '2024-01-10T14:15:00.000Z'
-  },
-  {
-    _id: '5',
-    name: 'South Dallas Residential',
-    description: 'Family-oriented residential community',
-    boundary: {
-      type: 'Polygon',
-      coordinates: [[[-96.797, 32.7467], [-96.787, 32.7367], [-96.807, 32.7567], [-96.797, 32.7467]]]
-    },
-    assignedAgentId: {
-      _id: 'agent4',
-      name: 'Emily Davis',
-      email: 'emily.davis@knockwise.com'
-    },
     teamId: {
-      _id: 'team3',
-      name: 'Team Gamma'
+      _id: 'team1',
+      name: 'team 1'
     },
-    status: 'ACTIVE',
-    totalResidents: 38,
-    activeResidents: 35,
-    completionRate: 92,
-    averageKnocks: 78,
-    lastActivity: '2024-01-15T16:30:00.000Z',
-    createdAt: '2024-01-05T00:00:00.000Z',
-    updatedAt: '2024-01-15T16:30:00.000Z'
-  },
-  {
-    _id: '6',
-    name: 'New Territory Draft',
-    description: 'This is a new territory that is currently in draft status and needs to be reviewed before activation',
-    boundary: {
-      type: 'Polygon',
-      coordinates: [[[-96.757, 32.7567], [-96.747, 32.7467], [-96.767, 32.7667], [-96.757, 32.7567]]]
+    currentAssignment: {
+      _id: 'assignment4',
+      teamId: {
+        _id: 'team1',
+        name: 'team 1'
+      },
+      effectiveFrom: '2025-08-20T00:00:00.000Z',
+      status: 'PENDING'
     },
-    status: 'DRAFT',
-    totalResidents: 0,
+    status: 'SCHEDULED',
+    totalResidents: 19,
     activeResidents: 0,
     completionRate: 0,
     averageKnocks: 0,
-    lastActivity: null,
-    createdAt: '2024-01-16T00:00:00.000Z',
-    updatedAt: '2024-01-16T00:00:00.000Z'
-  }
+    lastActivity: '2025-08-18T00:00:00.000Z',
+    createdAt: '2025-08-18T00:00:00.000Z',
+    updatedAt: '2025-08-18T00:00:00.000Z'
+  },
+  
 ]
 
 const mockStats: TerritoryStats = {
-  totalTerritories: 6,
-  activeTerritories: 4,
+  totalTerritories: 4,
+  activeTerritories: 0,
+  scheduledTerritories: 4,
+  draftTerritories: 0,
   assignedTerritories: 4,
-  unassignedTerritories: 2,
-  totalResidents: 155,
-  activeResidents: 131,
-  averageCompletionRate: 82,
+  unassignedTerritories: 0,
+  totalResidents: 69, // 10+15+25+19 from the territories
+  activeResidents: 0, // All territories have 0 active residents
+  averageCompletionRate: 0, // All territories have 0% completion
   totalArea: 1250000,
-  recentActivity: 12,
+  recentActivity: 14, // Updated to match the image
   topPerformingTerritory: {
-    name: 'South Dallas Residential',
-    completionRate: 92
+    name: 'zone 1',
+    completionRate: 0 // All territories have 0% completion
   },
   // Enhanced comprehensive stats
   averageMarketPotential: 87,
@@ -432,6 +423,117 @@ const fetchTerritoryStats = async (): Promise<TerritoryStats> => {
   }
 }
 
+// Function to calculate recent activities from territories data
+const calculateRecentActivity = (territories: Territory[]): number => {
+  const now = new Date()
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  
+  let activityCount = 0
+  
+  territories.forEach(territory => {
+    // Count activities based on territory updates and assignments
+    const lastActivity = new Date(territory.lastActivity || territory.updatedAt)
+    const createdAt = new Date(territory.createdAt)
+    
+    // If territory was created in last 24 hours
+    if (createdAt > twentyFourHoursAgo) {
+      activityCount += 1
+    }
+    
+    // If territory had activity in last 24 hours (but not just creation)
+    if (lastActivity > twentyFourHoursAgo && lastActivity.getTime() !== createdAt.getTime()) {
+      activityCount += 1
+    }
+    
+    // Only count assignments if they are ACTIVE (not scheduled for future)
+    if (territory.currentAssignment?.effectiveFrom && territory.status === 'ACTIVE') {
+      const assignmentCreated = new Date(territory.updatedAt) // Use territory update time as proxy
+      
+      // Only count if the assignment was created in the last 24 hours
+      if (assignmentCreated > twentyFourHoursAgo) {
+        activityCount += 1
+      }
+    }
+  })
+  
+  // Don't add any base activity - show 0 if there's no real activity
+  return activityCount
+}
+
+// Function to calculate dynamic stats from territories data
+const calculateDynamicStats = (territories: Territory[]): TerritoryStats => {
+  const totalTerritories = territories.length
+  const activeTerritories = territories.filter(t => t.status === 'ACTIVE').length
+  const scheduledTerritories = territories.filter(t => t.status === 'SCHEDULED').length
+  const draftTerritories = territories.filter(t => t.status === 'DRAFT').length
+  const assignedTerritories = territories.filter(t => t.currentAssignment).length
+  const unassignedTerritories = totalTerritories - assignedTerritories
+  
+  const totalResidents = territories.reduce((sum, t) => sum + (t.totalResidents || 0), 0)
+  const activeResidents = territories.reduce((sum, t) => sum + (t.activeResidents || 0), 0)
+  
+  const completionRates = territories.map(t => t.completionRate || 0).filter(rate => rate > 0)
+  const averageCompletionRate = completionRates.length > 0 
+    ? Math.round(completionRates.reduce((sum, rate) => sum + rate, 0) / completionRates.length)
+    : 0
+  
+  // Find top performing territory
+  const topPerformingTerritory = territories.reduce((top, current) => {
+    const currentRate = current.completionRate || 0
+    const topRate = top?.completionRate || 0
+    return currentRate > topRate ? current : top
+  }, null as Territory | null)
+  
+  return {
+    totalTerritories,
+    activeTerritories,
+    scheduledTerritories,
+    draftTerritories,
+    assignedTerritories,
+    unassignedTerritories,
+    totalResidents,
+    activeResidents,
+    averageCompletionRate,
+    totalArea: 1250000,
+    recentActivity: calculateRecentActivity(territories), // Calculate actual recent activities
+    topPerformingTerritory: topPerformingTerritory ? {
+      name: topPerformingTerritory.name,
+      completionRate: topPerformingTerritory.completionRate || 0
+    } : undefined,
+    // Enhanced comprehensive stats
+    averageMarketPotential: 87,
+    averagePropertyValue: 385000,
+    averageIncome: 72000,
+    totalMarketValue: 1925000,
+    averageWalkability: 78,
+    averageSchoolRating: 7.8,
+    averageCrimeRate: 2.8,
+    averageCompetitionLevel: 6.2,
+    totalConversionRate: 11.2,
+    totalAppointmentRate: 74.5,
+    totalCustomerSatisfaction: 8.3,
+    seasonalTrends: {
+      spring: 85,
+      summer: 72,
+      fall: 88,
+      winter: 79
+    },
+    demographicInsights: {
+      averageAge: 38.5,
+      averageHouseholdSize: 2.4,
+      averageHomeOwnership: 68,
+      averageEducationLevel: 7.9
+    },
+    performanceMetrics: {
+      totalKnocks: 1247,
+      totalAppointments: 156,
+      totalConversions: 18,
+      averageFollowUpRate: 82,
+      repeatBusinessRate: 12.5
+    }
+  }
+}
+
 export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props, ref) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -447,10 +549,17 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
     queryFn: fetchTerritories
   })
 
-  const { data: stats = mockStats } = useQuery({
+  // Calculate dynamic stats from territories data - this ensures cards are always up-to-date
+  const dynamicStats = calculateDynamicStats(territories)
+  
+  const { data: apiStats } = useQuery({
     queryKey: ['territoryStats'],
-    queryFn: fetchTerritoryStats
+    queryFn: fetchTerritoryStats,
+    enabled: false // Disable this query since we're using dynamic calculation
   })
+  
+  // Use dynamic stats, fallback to API stats if available, then mock stats
+  const stats = dynamicStats || apiStats || mockStats
 
   // Expose refetch function to parent component
   useImperativeHandle(ref, () => ({
@@ -527,6 +636,8 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
         return 'bg-orange-100 text-orange-800'
       case 'DRAFT':
         return 'bg-gray-100 text-gray-800'
+      case 'SCHEDULED':
+        return 'bg-blue-100 text-blue-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -569,7 +680,7 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
           <CardContent>
             <div className="text-2xl font-bold text-gray-900">{stats.totalTerritories}</div>
             <div className="text-xs text-gray-500 mt-1">
-              {stats.activeTerritories} active, {stats.unassignedTerritories} unassigned
+              {stats.activeTerritories} active, {stats.scheduledTerritories || 0} scheduled, {stats.draftTerritories || 0} draft
             </div>
           </CardContent>
         </Card>
@@ -604,19 +715,32 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
           </CardContent>
         </Card>
 
-        <Card className="border-gray-200 shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-600 flex items-center">
-              <Activity className="w-4 h-4 mr-2 text-orange-500" />
-              Recent Activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-gray-900">{stats.recentActivity}</div>
-            <div className="text-xs text-gray-500 mt-1">
-              Activities in last 24 hours
-            </div>
-          </CardContent>
+                 <Card className="border-gray-200 shadow-sm">
+           <CardHeader className="pb-3">
+             <CardTitle className="text-sm font-medium text-gray-600 flex items-center">
+               <TooltipProvider>
+                 <Tooltip>
+                   <TooltipTrigger asChild>
+                     <div className="flex items-center cursor-help">
+                       <Activity className="w-4 h-4 mr-2 text-orange-500" />
+                       Recent Activity
+                     </div>
+                   </TooltipTrigger>
+                                       <TooltipContent>
+                      <p className="max-w-xs">
+                        Counts territory creations, updates, and recent assignments in the last 24 hours
+                      </p>
+                    </TooltipContent>
+                 </Tooltip>
+               </TooltipProvider>
+             </CardTitle>
+           </CardHeader>
+                     <CardContent>
+             <div className="text-2xl font-bold text-gray-900">{stats.recentActivity}</div>
+             <div className="text-xs text-gray-500 mt-1">
+               Territory updates & assignments
+             </div>
+           </CardContent>
         </Card>
       </div>
 
@@ -644,6 +768,7 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                   <SelectItem value="ACTIVE">Active</SelectItem>
                   <SelectItem value="INACTIVE">Inactive</SelectItem>
                   <SelectItem value="DRAFT">Draft</SelectItem>
+                  <SelectItem value="SCHEDULED">Scheduled</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={teamFilter} onValueChange={setTeamFilter}>
@@ -675,10 +800,11 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                   <TableHead className="font-medium text-gray-900">Assigned Agent</TableHead>
                   <TableHead className="font-medium text-gray-900">Team</TableHead>
                   <TableHead className="font-medium text-gray-900">Residents</TableHead>
-                  <TableHead className="font-medium text-gray-900">Performance</TableHead>
-                  <TableHead className="font-medium text-gray-900">Status</TableHead>
-                  <TableHead className="font-medium text-gray-900">Last Activity</TableHead>
-                  <TableHead className="font-medium text-gray-900">Actions</TableHead>
+                                     <TableHead className="font-medium text-gray-900">Performance</TableHead>
+                   <TableHead className="font-medium text-gray-900">Status</TableHead>
+                   <TableHead className="font-medium text-gray-900">Scheduled Date</TableHead>
+                   <TableHead className="font-medium text-gray-900">Last Activity</TableHead>
+                   <TableHead className="font-medium text-gray-900">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -706,26 +832,43 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="align-top">
-                      {territory.currentAssignment?.agentId ? (
-                        <div className="space-y-1">
-                          <p className="font-medium text-gray-900 truncate">{territory.currentAssignment.agentId.name}</p>
-                          <p className="text-sm text-gray-500 truncate">{territory.currentAssignment.agentId.email}</p>
-                        </div>
-                      ) : (
-                        <span className="text-gray-400">Unassigned</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="align-top">
-                      {territory.currentAssignment?.teamId ? (
-                        <Badge variant="outline" className="text-xs">
-                          <Building className="w-3 h-3 mr-1" />
-                          {territory.currentAssignment.teamId.name}
-                        </Badge>
-                      ) : (
-                        <span className="text-gray-400">No team</span>
-                      )}
-                    </TableCell>
+                                         <TableCell className="align-top">
+                       {territory.currentAssignment?.agentId ? (
+                         <div className="space-y-1">
+                           <div className="flex items-center space-x-2">
+                             <div className="w-6 h-6 bg-blue-100 rounded-full flex items-center justify-center">
+                               <UserCheck className="w-3 h-3 text-blue-600" />
+                             </div>
+                             <div className="min-w-0 flex-1">
+                               <p className="font-medium text-gray-900 truncate">{territory.currentAssignment.agentId.name}</p>
+                               <p className="text-xs text-gray-500 truncate">{territory.currentAssignment.agentId.email}</p>
+                             </div>
+                           </div>
+                         </div>
+                       ) : (
+                         <div className="flex items-center space-x-2">
+                           <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center">
+                             <AlertCircle className="w-3 h-3 text-gray-400" />
+                           </div>
+                           <span className="text-gray-400 text-sm">Unassigned</span>
+                         </div>
+                       )}
+                     </TableCell>
+                     <TableCell className="align-top">
+                       {territory.currentAssignment?.teamId ? (
+                         <Badge className="text-xs bg-purple-100 text-purple-800 border-purple-200 hover:bg-purple-200">
+                           <Building className="w-3 h-3 mr-1" />
+                           {territory.currentAssignment.teamId.name}
+                         </Badge>
+                       ) : (
+                         <div className="flex items-center space-x-2">
+                           <div className="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center">
+                             <Users className="w-3 h-3 text-gray-400" />
+                           </div>
+                           <span className="text-gray-400 text-sm">No team</span>
+                         </div>
+                       )}
+                     </TableCell>
                     <TableCell className="align-top">
                       <div className="space-y-1">
                         <div className="flex items-center justify-between text-sm">
@@ -752,23 +895,37 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="align-top">
-                      <Badge className={`text-xs ${getStatusColor(territory.status)}`}>
-                        {territory.status === 'ACTIVE' ? (
-                          <CheckCircle className="w-3 h-3 mr-1" />
-                        ) : territory.status === 'INACTIVE' ? (
-                          <Clock className="w-3 h-3 mr-1" />
-                        ) : (
-                          <FileText className="w-3 h-3 mr-1" />
-                        )}
-                        {territory.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="align-top">
-                      <div className="text-sm text-gray-600">
-                        {formatDate(territory.lastActivity || territory.updatedAt)}
-                      </div>
-                    </TableCell>
+                                         <TableCell className="align-top">
+                       <Badge className={`text-xs ${getStatusColor(territory.status)}`}>
+                         {territory.status === 'ACTIVE' ? (
+                           <CheckCircle className="w-3 h-3 mr-1" />
+                         ) : territory.status === 'INACTIVE' ? (
+                           <Clock className="w-3 h-3 mr-1" />
+                         ) : territory.status === 'SCHEDULED' ? (
+                           <Calendar className="w-3 h-3 mr-1" />
+                         ) : (
+                           <FileText className="w-3 h-3 mr-1" />
+                         )}
+                         {territory.status}
+                       </Badge>
+                     </TableCell>
+                     <TableCell className="align-top">
+                       <div className="text-sm text-gray-600">
+                         {territory.status === 'SCHEDULED' && territory.currentAssignment?.effectiveFrom ? (
+                           <div className="flex items-center space-x-1">
+                             <Calendar className="w-3 h-3 text-blue-500" />
+                             <span>{formatDate(territory.currentAssignment.effectiveFrom)}</span>
+                           </div>
+                         ) : (
+                           <span className="text-gray-400">-</span>
+                         )}
+                       </div>
+                     </TableCell>
+                     <TableCell className="align-top">
+                       <div className="text-sm text-gray-600">
+                         {formatDate(territory.lastActivity || territory.updatedAt)}
+                       </div>
+                     </TableCell>
                     <TableCell className="align-top">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

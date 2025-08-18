@@ -20,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <QueryProvider>
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning className="light" style={{ colorScheme: 'light' }}>
       <head>
         <style>{`
 html {

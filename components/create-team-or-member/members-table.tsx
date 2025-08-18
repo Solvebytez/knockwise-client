@@ -47,6 +47,15 @@ interface Member {
     _id: string
     name: string
   }
+  teamZoneInfo?: {
+    _id: string
+    name: string
+  }
+  allAssignedZones?: Array<{
+    _id: string
+    name: string
+    isPrimary: boolean
+  }>
   teamIds: string[]
   zoneIds: string[]
   createdBy?: {
@@ -70,97 +79,17 @@ interface DetailedMember extends Member {
   }>
 }
 
-const mockMembers: Member[] = [
-  {
-    _id: '1',
-    name: 'Riya Mehta',
-    email: 'riya@zenith.com',
-    contactNumber: '+91 98765 43210',
-    username: 'riya_mehta',
-    role: 'AGENT',
-    status: 'ACTIVE',
-    primaryTeamId: { _id: 'team1', name: 'Team Alpha' },
-    primaryZoneId: { _id: 'zone1', name: 'Janipur East' },
-    teamIds: ['team1'],
-    zoneIds: ['zone1'],
-    createdBy: { _id: 'admin1', name: 'Admin User', email: 'admin@knockwise.com' },
-    createdAt: '2024-01-15',
-    knockedToday: 10
-  },
-  {
-    _id: '2',
-    name: 'Aman Shah',
-    email: 'aman@axis.com',
-    contactNumber: '+91 91012 33445',
-    username: 'aman_shah',
-    role: 'AGENT',
-    status: 'ACTIVE',
-    primaryTeamId: { _id: 'team2', name: 'Team Beta' },
-    primaryZoneId: { _id: 'zone2', name: 'Gandhi Nagar' },
-    teamIds: ['team2'],
-    zoneIds: ['zone2'],
-    createdBy: { _id: 'admin1', name: 'Admin User', email: 'admin@knockwise.com' },
-    createdAt: '2024-01-10',
-    knockedToday: 20
-  },
-  {
-    _id: '3',
-    name: 'Rohit Gupta',
-    email: 'rohit@bluewave.in',
-    contactNumber: '+91 99887 77665',
-    username: 'rohit_gupta',
-    role: 'AGENT',
-    status: 'ACTIVE',
-    primaryTeamId: { _id: 'team3', name: 'Team Gamma' },
-    primaryZoneId: { _id: 'zone3', name: 'Satwari' },
-    teamIds: ['team3'],
-    zoneIds: ['zone3'],
-    createdBy: { _id: 'admin1', name: 'Admin User', email: 'admin@knockwise.com' },
-    createdAt: '2024-01-20',
-    knockedToday: 14
-  },
-  {
-    _id: '4',
-    name: 'Snehal Verma',
-    email: 'snehal@dwellrise.com',
-    contactNumber: '+91 80802 12222',
-    username: 'snehal_verma',
-    role: 'AGENT',
-    status: 'ACTIVE',
-    primaryTeamId: { _id: 'team4', name: 'Team Delta' },
-    primaryZoneId: { _id: 'zone4', name: 'Shiv Nagar' },
-    teamIds: ['team4'],
-    zoneIds: ['zone4'],
-    createdBy: { _id: 'admin1', name: 'Admin User', email: 'admin@knockwise.com' },
-    createdAt: '2024-01-05',
-    knockedToday: 40
-  },
-  {
-    _id: '5',
-    name: 'Gourav Sharma',
-    email: 'gourav@zenith.com',
-    contactNumber: '+91 85955 44411',
-    username: 'gourav_sharma',
-    role: 'AGENT',
-    status: 'ACTIVE',
-    primaryTeamId: { _id: 'team2', name: 'Team Beta' },
-    primaryZoneId: { _id: 'zone2', name: 'Gandhi Nagar' },
-    teamIds: ['team2'],
-    zoneIds: ['zone2'],
-    createdBy: { _id: 'admin1', name: 'Admin User', email: 'admin@knockwise.com' },
-    createdAt: '2024-01-12',
-    knockedToday: 39
-  }
-]
+// Mock data removed - using real API data only
 
 const fetchMembers = async (): Promise<Member[]> => {
   try {
     const response = await apiInstance.get('/users/my-created-agents')
+    console.log('API Response:', response.data)
     return response.data.data || []
   } catch (error) {
     console.error('Error fetching members:', error)
-    // Fallback to mock data if API fails
-    return mockMembers
+    // Return empty array instead of mock data to show real status
+    return []
   }
 }
 
@@ -277,15 +206,22 @@ export function MembersTable() {
     setIsDeleteDialogOpen(true)
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
     if (memberToDelete) {
       deleteMemberMutation.mutate(memberToDelete._id)
     }
   }
 
-  const cancelDelete = () => {
-    setIsDeleteDialogOpen(false)
-    setMemberToDelete(null)
+  const cancelDelete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only allow canceling if not currently deleting
+    if (!deleteMemberMutation.isPending) {
+      setIsDeleteDialogOpen(false)
+      setMemberToDelete(null)
+    }
   }
 
   const handleEditMember = (member: Member) => {
@@ -531,7 +467,14 @@ export function MembersTable() {
                         <div className="flex items-center text-sm">
                           <MapPin className="w-4 h-4 mr-2 text-green-500" />
                           <span className="text-gray-600">
-                            {member.primaryZoneId?.name || 'Unassigned'}
+                            {member.allAssignedZones && member.allAssignedZones.length > 0 
+                              ? member.allAssignedZones.map((zone: any, index: number) => (
+                                  <span key={zone._id} className={`${index > 0 ? 'ml-1' : ''} ${zone.isPrimary ? 'font-semibold' : ''}`}>
+                                    {zone.name}{index < (member.allAssignedZones?.length || 0) - 1 ? ', ' : ''}
+                                  </span>
+                                ))
+                              : member.primaryZoneId?.name || member.teamZoneInfo?.name || 'Unassigned'
+                            }
                           </span>
                         </div>
                       </div>
@@ -1068,7 +1011,7 @@ export function MembersTable() {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <AlertDialog open={isDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
@@ -1083,7 +1026,11 @@ export function MembersTable() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={cancelDelete} className="border-gray-300 text-gray-700 hover:bg-gray-50">
+            <AlertDialogCancel 
+              onClick={cancelDelete} 
+              className="border-gray-300 text-gray-700 hover:bg-gray-50"
+              disabled={deleteMemberMutation.isPending}
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction 

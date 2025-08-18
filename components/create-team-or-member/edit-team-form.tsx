@@ -87,7 +87,8 @@ export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
       queryClient.invalidateQueries({ queryKey: ['teams'] })
       queryClient.invalidateQueries({ queryKey: ['teamStats'] })
       queryClient.invalidateQueries({ queryKey: ['teamPerformance'] })
-      toast.success('Team updated successfully')
+      queryClient.invalidateQueries({ queryKey: ['myCreatedAgents'] }) // Refresh agent data to show updated zone assignments
+      toast.success('Team updated successfully. Zone assignments have been synced for all team members.')
       onSuccess?.()
     },
     onError: (error: any) => {

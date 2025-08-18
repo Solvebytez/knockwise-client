@@ -951,7 +951,7 @@ export function TerritoryMap() {
         // Prepare assignment data
         const assignmentData = {
           zoneId: selectedTerritory.id,
-          effectiveFrom: new Date(assignedDate),
+          effectiveFrom: new Date(assignedDate).toISOString(),
           status: 'ACTIVE' as const,
           ...(assignmentType === "team" 
             ? { teamId: selectedAssignment._id }
@@ -1988,7 +1988,7 @@ export function TerritoryMap() {
 
                 {/* Date Assignment */}
                 <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">Date Assigned</label>
+                  <label className="text-sm font-medium text-gray-700 mb-2 block">Assignment Date</label>
                   <div className="relative">
                     <Input
                       type="date"

@@ -10,14 +10,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { 
   Users, 
   UserPlus, 
-  UserCheck, 
-  UserX, 
   TrendingUp, 
+  UserX, 
   Target, 
   MapPin, 
   Building,
   Activity,
-  Calendar,
   BarChart3,
   Filter,
   Download,
@@ -143,20 +141,20 @@ export function TeamManagementDashboard() {
       change: `${stats?.recentActivity?.newMembers || 0} new this month`
     },
     {
-      title: "Active Members",
-      value: stats?.activeMembers || 0,
-      icon: UserCheck,
-      color: "text-emerald-600",
-      bgColor: "bg-emerald-50",
-      change: `${stats?.totalMembers ? Math.round((stats.activeMembers / stats.totalMembers) * 100) : 0}% assigned to teams/work`
-    },
-    {
       title: "Inactive Teams",
       value: stats?.inactiveTeams || 0,
       icon: UserX,
       color: "text-red-600",
       bgColor: "bg-red-50",
       change: "No work/territory assigned"
+    },
+    {
+      title: "Total Zones",
+      value: stats?.totalZones || 0,
+      icon: MapPin,
+      color: "text-purple-600",
+      bgColor: "bg-purple-50",
+      change: `${stats?.totalZones || 0} zones covered`
     }
   ]
 
@@ -262,67 +260,57 @@ export function TeamManagementDashboard() {
       </Card>
 
              {/* Main Stats Grid */}
-       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
-         {mainStats.map((stat, index) => (
-           <Card key={index} className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-             <CardContent className="p-6">
-               <div className="flex items-center justify-between">
-                 <div className="flex items-center">
-                   <div className={`p-3 rounded-lg ${stat.bgColor}`}>
-                     <stat.icon className={`w-6 h-6 ${stat.color}`} />
+       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+         {statsLoading ? (
+           // Skeleton loading state for stats cards
+           [...Array(4)].map((_, index) => (
+             <Card key={index} className="border-gray-200 shadow-sm">
+               <CardContent className="p-6">
+                 <div className="flex items-center justify-between">
+                   <div className="flex items-center">
+                     <div className="animate-pulse">
+                       <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
+                     </div>
+                     <div className="ml-4 space-y-2">
+                       <div className="animate-pulse">
+                         <div className="h-4 bg-gray-200 rounded w-20"></div>
+                       </div>
+                       <div className="animate-pulse">
+                         <div className="h-8 bg-gray-200 rounded w-12"></div>
+                       </div>
+                     </div>
                    </div>
-                   <div className="ml-4">
-                     <p className="text-sm font-medium text-gray-600">{stat.title}</p>
-                     <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                 </div>
+                 <div className="mt-4">
+                   <div className="animate-pulse">
+                     <div className="h-3 bg-gray-200 rounded w-24"></div>
                    </div>
                  </div>
-               </div>
-               <div className="mt-4">
-                 <p className="text-xs text-gray-500">{stat.change}</p>
-               </div>
-             </CardContent>
-           </Card>
-         ))}
-         
-         {/* Inactive Members Card */}
-         <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-           <CardContent className="p-6">
-             <div className="flex items-center justify-between">
-               <div className="flex items-center">
-                 <div className="p-3 rounded-lg bg-orange-50">
-                   <UserX className="w-6 h-6 text-orange-600" />
+               </CardContent>
+             </Card>
+           ))
+         ) : (
+           mainStats.map((stat, index) => (
+             <Card key={index} className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+               <CardContent className="p-6">
+                 <div className="flex items-center justify-between">
+                   <div className="flex items-center">
+                     <div className={`p-3 rounded-lg ${stat.bgColor}`}>
+                       <stat.icon className={`w-6 h-6 ${stat.color}`} />
+                     </div>
+                     <div className="ml-4">
+                       <p className="text-sm font-medium text-gray-600">{stat.title}</p>
+                       <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
+                     </div>
+                   </div>
                  </div>
-                 <div className="ml-4">
-                   <p className="text-sm font-medium text-gray-600">Inactive Members</p>
-                   <p className="text-2xl font-bold text-gray-900">{stats?.inactiveMembers || 0}</p>
+                 <div className="mt-4">
+                   <p className="text-xs text-gray-500">{stat.change}</p>
                  </div>
-               </div>
-             </div>
-             <div className="mt-4">
-               <p className="text-xs text-gray-500">Not assigned to teams/work</p>
-             </div>
-           </CardContent>
-         </Card>
-         
-         {/* Total Zones Card */}
-         <Card className="border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-           <CardContent className="p-6">
-             <div className="flex items-center justify-between">
-               <div className="flex items-center">
-                 <div className="p-3 rounded-lg bg-purple-50">
-                   <MapPin className="w-6 h-6 text-purple-600" />
-                 </div>
-                 <div className="ml-4">
-                   <p className="text-sm font-medium text-gray-600">Total Zones</p>
-                   <p className="text-2xl font-bold text-gray-900">{stats?.totalZones || 0}</p>
-                 </div>
-               </div>
-             </div>
-             <div className="mt-4">
-               <p className="text-xs text-gray-500">{stats?.totalZones || 0} zones covered</p>
-             </div>
-           </CardContent>
-         </Card>
+               </CardContent>
+             </Card>
+           ))
+         )}
        </div>
 
       {/* Performance Overview */}
@@ -336,15 +324,29 @@ export function TeamManagementDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-[#42A5F5] mb-2">
-                {stats?.averagePerformance || 0}%
+            {statsLoading ? (
+              <div className="text-center space-y-4">
+                <div className="animate-pulse">
+                  <div className="h-12 bg-gray-200 rounded w-20 mx-auto mb-2"></div>
+                </div>
+                <div className="animate-pulse">
+                  <div className="h-2 bg-gray-200 rounded w-full mb-4"></div>
+                </div>
+                <div className="animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded w-32 mx-auto"></div>
+                </div>
               </div>
-              <Progress value={stats?.averagePerformance || 0} className="h-2 mb-4" />
-              <p className="text-sm text-gray-600">
-                Across all teams this month
-              </p>
-            </div>
+            ) : (
+              <div className="text-center">
+                <div className="text-4xl font-bold text-[#42A5F5] mb-2">
+                  {stats?.averagePerformance || 0}%
+                </div>
+                <Progress value={stats?.averagePerformance || 0} className="h-2 mb-4" />
+                <p className="text-sm text-gray-600">
+                  Across all teams this month
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -357,17 +359,31 @@ export function TeamManagementDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600 mb-2">
-                {stats?.topPerformingTeam.name || 'N/A'}
+            {statsLoading ? (
+              <div className="text-center space-y-4">
+                <div className="animate-pulse">
+                  <div className="h-8 bg-gray-200 rounded w-24 mx-auto mb-2"></div>
+                </div>
+                <div className="animate-pulse">
+                  <div className="h-10 bg-gray-200 rounded w-16 mx-auto mb-2"></div>
+                </div>
+                <div className="animate-pulse">
+                  <div className="h-6 bg-gray-200 rounded w-20 mx-auto"></div>
+                </div>
               </div>
-              <div className="text-3xl font-bold text-gray-900 mb-2">
-                {stats?.topPerformingTeam.performance || 0}%
+            ) : (
+              <div className="text-center">
+                <div className="text-2xl font-bold text-green-600 mb-2">
+                  {stats?.topPerformingTeam.name || 'N/A'}
+                </div>
+                <div className="text-3xl font-bold text-gray-900 mb-2">
+                  {stats?.topPerformingTeam.performance || 0}%
+                </div>
+                <Badge className="bg-green-100 text-green-800">
+                  Best Performance
+                </Badge>
               </div>
-              <Badge className="bg-green-100 text-green-800">
-                Best Performance
-              </Badge>
-            </div>
+            )}
           </CardContent>
         </Card>
 
@@ -380,23 +396,43 @@ export function TeamManagementDashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {activityStats.map((activity, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className={`p-2 rounded-lg ${activity.bgColor}`}>
-                      <activity.icon className={`w-4 h-4 ${activity.color}`} />
+            {statsLoading ? (
+              <div className="space-y-4">
+                {[...Array(3)].map((_, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="animate-pulse">
+                        <div className="w-8 h-8 bg-gray-200 rounded-lg"></div>
+                      </div>
+                      <div className="ml-3 animate-pulse">
+                        <div className="h-4 bg-gray-200 rounded w-20"></div>
+                      </div>
                     </div>
-                    <span className="ml-3 text-sm font-medium text-gray-700">
-                      {activity.title}
+                    <div className="animate-pulse">
+                      <div className="h-6 bg-gray-200 rounded w-8"></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {activityStats.map((activity, index) => (
+                  <div key={index} className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className={`p-2 rounded-lg ${activity.bgColor}`}>
+                        <activity.icon className={`w-4 h-4 ${activity.color}`} />
+                      </div>
+                      <span className="ml-3 text-sm font-medium text-gray-700">
+                        {activity.title}
+                      </span>
+                    </div>
+                    <span className="text-lg font-bold text-gray-900">
+                      {activity.value}
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-gray-900">
-                    {activity.value}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

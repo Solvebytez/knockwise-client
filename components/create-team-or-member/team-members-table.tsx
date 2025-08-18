@@ -57,6 +57,7 @@ interface Team {
   name: string
   description?: string
   superadminId: string
+  status: 'ACTIVE' | 'INACTIVE'
   leaderId: {
     _id: string
     name: string
@@ -83,78 +84,13 @@ interface Team {
   }
 }
 
-const mockTeams: Team[] = [
-  {
-    _id: '1',
-    name: 'Team Alpha',
-    description: 'High-performing sales team',
-    superadminId: 'admin1',
-    leaderId: { _id: 'leader1', name: 'Riya Mehta', email: 'riya@zenith.com' },
-    agentIds: [
-      { _id: 'agent1', name: 'Aman Shah', email: 'aman@axis.com', status: 'ACTIVE' },
-      { _id: 'agent2', name: 'Rohit Gupta', email: 'rohit@bluewave.in', status: 'ACTIVE' },
-      { _id: 'agent3', name: 'Snehal Verma', email: 'snehal@dwellrise.com', status: 'INACTIVE' }
-    ],
-    createdAt: '2024-01-15',
-    updatedAt: '2024-01-20',
-    performance: {
-      totalMembers: 3,
-      activeMembers: 2,
-      averageKnocks: 85,
-      completionRate: 92,
-      zoneCoverage: 4
-    }
-  },
-  {
-    _id: '2',
-    name: 'Team Beta',
-    description: 'New territory expansion team',
-    superadminId: 'admin1',
-    leaderId: { _id: 'leader2', name: 'Gourav Sharma', email: 'gourav@zenith.com' },
-    agentIds: [
-      { _id: 'agent4', name: 'Priya Singh', email: 'priya@axis.com', status: 'ACTIVE' },
-      { _id: 'agent5', name: 'Vikram Patel', email: 'vikram@bluewave.in', status: 'ACTIVE' }
-    ],
-    createdAt: '2024-01-10',
-    updatedAt: '2024-01-18',
-    performance: {
-      totalMembers: 2,
-      activeMembers: 2,
-      averageKnocks: 72,
-      completionRate: 88,
-      zoneCoverage: 3
-    }
-  },
-  {
-    _id: '3',
-    name: 'Team Gamma',
-    description: 'Premium client focus team',
-    superadminId: 'admin1',
-    leaderId: { _id: 'leader3', name: 'Neha Kumar', email: 'neha@dwellrise.com' },
-    agentIds: [
-      { _id: 'agent6', name: 'Arjun Reddy', email: 'arjun@zenith.com', status: 'ACTIVE' },
-      { _id: 'agent7', name: 'Zara Khan', email: 'zara@axis.com', status: 'ACTIVE' },
-      { _id: 'agent8', name: 'Raj Malhotra', email: 'raj@bluewave.in', status: 'ACTIVE' }
-    ],
-    createdAt: '2024-01-20',
-    updatedAt: '2024-01-22',
-    performance: {
-      totalMembers: 3,
-      activeMembers: 3,
-      averageKnocks: 68,
-      completionRate: 85,
-      zoneCoverage: 5
-    }
-  }
-]
-
 const fetchTeams = async (): Promise<Team[]> => {
   try {
     const response = await apiInstance.get('/teams')
     return response.data.data || []
   } catch (error) {
     console.error('Error fetching teams:', error)
-    return mockTeams
+    return []
   }
 }
 
@@ -209,11 +145,13 @@ export function TeamMembersTable() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] })
       toast.success('Team deleted successfully')
+      // Close modal only on success
       setIsDeleteDialogOpen(false)
       setTeamToDelete(null)
     },
     onError: () => {
       toast.error('Failed to delete team')
+      // Keep modal open on error so user can try again
     }
   })
 
@@ -221,10 +159,10 @@ export function TeamMembersTable() {
   const filteredTeams = teams.filter(team => {
     const matchesSearch = team.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          team.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         team.leaderId.name.toLowerCase().includes(searchTerm.toLowerCase())
+                         (team.leaderId?.name || '').toLowerCase().includes(searchTerm.toLowerCase())
     const matchesStatus = statusFilter === 'all' || 
-                         (statusFilter === 'active' && (team.performance?.activeMembers || 0) > 0) ||
-                         (statusFilter === 'inactive' && (team.performance?.activeMembers || 0) === 0)
+                         (statusFilter === 'active' && team.status === 'ACTIVE') ||
+                         (statusFilter === 'inactive' && team.status === 'INACTIVE')
     return matchesSearch && matchesStatus
   })
 
@@ -255,9 +193,21 @@ export function TeamMembersTable() {
     queryClient.invalidateQueries({ queryKey: ['teamPerformance'] })
   }
 
-  const confirmDelete = () => {
+  const confirmDelete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
     if (teamToDelete) {
       deleteTeamMutation.mutate(teamToDelete._id)
+    }
+  }
+
+  const cancelDelete = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only allow canceling if not currently deleting
+    if (!deleteTeamMutation.isPending) {
+      setIsDeleteDialogOpen(false)
+      setTeamToDelete(null)
     }
   }
 
@@ -393,11 +343,11 @@ export function TeamMembersTable() {
                       <div className="space-y-1">
                         <div className="flex items-center text-sm text-gray-600">
                           <Shield className="w-4 h-4 mr-2 text-blue-500" />
-                          <span className="font-medium text-gray-900">{team.leaderId.name}</span>
+                          <span className="font-medium text-gray-900">{team.leaderId?.name || '—'}</span>
                         </div>
                         <div className="flex items-center text-sm text-gray-600">
                           <Mail className="w-4 h-4 mr-2 text-gray-400" />
-                          {team.leaderId.email}
+                          {team.leaderId?.email || '—'}
                         </div>
                       </div>
                     </td>
@@ -436,14 +386,14 @@ export function TeamMembersTable() {
                     <td className="py-3 px-4">
                       <div className="flex items-center">
                         <div className={`w-2 h-2 rounded-full mr-2 ${
-                          (team.performance?.activeMembers || 0) > 0 ? 'bg-green-500' : 'bg-orange-500'
+                          team.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
                         }`}></div>
                         <Badge className={`text-xs ${
-                          (team.performance?.activeMembers || 0) > 0
+                          team.status === 'ACTIVE'
                             ? 'bg-green-100 text-green-800' 
                             : 'bg-orange-100 text-orange-800'
                         }`}>
-                          {(team.performance?.activeMembers || 0) > 0 ? 'Active' : 'Inactive'}
+                          {team.status === 'ACTIVE' ? 'Active' : 'Inactive'}
                         </Badge>
                       </div>
                     </td>
@@ -757,7 +707,7 @@ export function TeamMembersTable() {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <AlertDialog open={isDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
@@ -772,7 +722,11 @@ export function TeamMembersTable() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-gray-300 text-gray-700 hover:bg-gray-50">
+            <AlertDialogCancel 
+              onClick={cancelDelete}
+              className="border-gray-300 text-gray-700 hover:bg-gray-50"
+              disabled={deleteTeamMutation.isPending}
+            >
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction 
