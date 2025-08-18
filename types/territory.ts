@@ -14,16 +14,15 @@ export interface Resident {
 }
 
 export type ResidentStatus =
-  | "new"
-  | "knocked"
-  | "not-home"
+  | "not-visited"
   | "interested"
+  | "visited"
   | "callback"
-  | "not-interested"
-  | "do-not-knock"
   | "appointment"
+  | "follow-up"
+  | "not-interested"
 
-export type TerritoryStatus = "draft" | "assigned"
+export type TerritoryStatus = "draft" | "assigned" | "active" | "inactive"
 
 export interface Territory {
   id: string

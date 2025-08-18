@@ -69,7 +69,11 @@ const generateRandomPassword = (): string => {
   return password.split('').sort(() => Math.random() - 0.5).join('')
 }
 
-export function CreateMemberForm() {
+interface CreateMemberFormProps {
+  onSuccess?: () => void
+}
+
+export function CreateMemberForm({ onSuccess }: CreateMemberFormProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [isGeneratingPassword, setIsGeneratingPassword] = useState(false)
   const queryClient = useQueryClient()
@@ -103,6 +107,13 @@ export function CreateMemberForm() {
       queryClient.invalidateQueries({ queryKey: ['members'] });
       queryClient.invalidateQueries({ queryKey: ['team-overview'] });
       queryClient.invalidateQueries({ queryKey: ['recent-additions'] });
+      queryClient.invalidateQueries({ queryKey: ['team-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['team-performance'] });
+      
+      // Call the onSuccess callback if provided
+      if (onSuccess) {
+        onSuccess();
+      }
     },
     onError: (error: any) => {
       console.error('Error creating agent:', error);

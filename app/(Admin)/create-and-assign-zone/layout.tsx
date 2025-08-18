@@ -1,18 +1,16 @@
-
-
 import { DashboardHeader } from "@/components/dashboard-header"
 import { DashboardNavigation } from "@/components/dashboard-navigation"
 
-export default function TerritoryMapLayout({
+export default function CreateAndAssignZoneLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="h-screen bg-white">
       <DashboardHeader />
       <DashboardNavigation />
-      <main>
+      <main className="flex-1 overflow-hidden">
         {children}
       </main>
     </div>

@@ -188,6 +188,7 @@ export function MembersTable() {
   const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
   const [territoryFilter, setTerritoryFilter] = useState('all')
+  const [teamFilter, setTeamFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedMember, setSelectedMember] = useState<DetailedMember | null>(null)
@@ -371,8 +372,9 @@ export function MembersTable() {
     const matchesSearch = member.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          member.email.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesTerritory = territoryFilter === 'all' || member.primaryZoneId?.name === territoryFilter
+    const matchesTeam = teamFilter === 'all' || member.primaryTeamId?.name === teamFilter
     const matchesStatus = statusFilter === 'all' || member.status === statusFilter
-    return matchesSearch && matchesTerritory && matchesStatus
+    return matchesSearch && matchesTerritory && matchesTeam && matchesStatus
   })
 
   // Pagination
@@ -424,28 +426,45 @@ export function MembersTable() {
                   className="pl-10 w-64 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20"
                 />
               </div>
-              <Select value={territoryFilter} onValueChange={setTerritoryFilter}>
-                <SelectTrigger className="w-40 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
-                  <SelectValue placeholder="All Territories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Territories</SelectItem>
-                  <SelectItem value="Janipur East">Janipur East</SelectItem>
-                  <SelectItem value="Gandhi Nagar">Gandhi Nagar</SelectItem>
-                  <SelectItem value="Satwari">Satwari</SelectItem>
-                  <SelectItem value="Shiv Nagar">Shiv Nagar</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-32 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
-                  <SelectValue placeholder="All Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="ACTIVE">Active</SelectItem>
-                  <SelectItem value="INACTIVE">Inactive</SelectItem>
-                </SelectContent>
-              </Select>
+                             <Select value={territoryFilter} onValueChange={setTerritoryFilter}>
+                 <SelectTrigger className="w-40 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
+                   <SelectValue placeholder="All Territories" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">All Territories</SelectItem>
+                   {Array.from(new Set(members.map(member => member.primaryZoneId?.name).filter(Boolean))).map(zoneName => (
+                     <SelectItem key={zoneName} value={zoneName!}>
+                       {zoneName}
+                     </SelectItem>
+                   ))}
+                 </SelectContent>
+               </Select>
+               <Select value={teamFilter} onValueChange={setTeamFilter}>
+                 <SelectTrigger className="w-40 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
+                   <SelectValue placeholder="All Teams" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">All Teams</SelectItem>
+                   {Array.from(new Set(members.map(member => member.primaryTeamId?.name).filter(Boolean))).map(teamName => (
+                     <SelectItem key={teamName} value={teamName!}>
+                       {teamName}
+                     </SelectItem>
+                   ))}
+                 </SelectContent>
+               </Select>
+               <Select value={statusFilter} onValueChange={setStatusFilter}>
+                 <SelectTrigger className="w-32 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
+                   <SelectValue placeholder="All Status" />
+                 </SelectTrigger>
+                 <SelectContent>
+                   <SelectItem value="all">All Status</SelectItem>
+                   {Array.from(new Set(members.map(member => member.status))).map(status => (
+                     <SelectItem key={status} value={status}>
+                       {status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                     </SelectItem>
+                   ))}
+                 </SelectContent>
+               </Select>
             </div>
           </div>
 
@@ -454,11 +473,10 @@ export function MembersTable() {
             <table className="w-full">
               <thead>
                 <tr className="bg-[#42A5F5] text-white">
-                  <th className="text-left py-3 px-4 font-medium">SalesRep Name</th>
-                  <th className="text-left py-3 px-4 font-medium">Email</th>
-                  <th className="text-left py-3 px-4 font-medium">Phone</th>
-                  <th className="text-left py-3 px-4 font-medium">Zone</th>
-                  <th className="text-left py-3 px-4 font-medium">Knocked Today</th>
+                  <th className="text-left py-3 px-4 font-medium">Member</th>
+                  <th className="text-left py-3 px-4 font-medium">Contact</th>
+                  <th className="text-left py-3 px-4 font-medium">Team & Zone</th>
+                  <th className="text-left py-3 px-4 font-medium">Performance</th>
                   <th className="text-left py-3 px-4 font-medium">Status</th>
                   <th className="text-left py-3 px-4 font-medium">Actions</th>
                 </tr>
@@ -466,23 +484,78 @@ export function MembersTable() {
               <tbody>
                 {paginatedMembers.map((member) => (
                   <tr key={member._id} className="border-b border-gray-200 hover:bg-gray-50">
-                    <td className="py-3 px-4 font-medium text-gray-900">{member.name}</td>
-                    <td className="py-3 px-4 text-gray-600">{member.email}</td>
-                    <td className="py-3 px-4 text-gray-600">{member.contactNumber || 'N/A'}</td>
-                    <td className="py-3 px-4 text-gray-600">
-                      {member.primaryZoneId?.name || 'Unassigned'}
+                    <td className="py-3 px-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-10 h-10 bg-[#42A5F5] rounded-full flex items-center justify-center">
+                          <span className="text-white text-sm font-medium">
+                            {member.name.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-900">{member.name}</p>
+                          <p className="text-sm text-gray-500">{member.email}</p>
+                          <div className="flex items-center space-x-2 mt-1">
+                            <Badge variant="outline" className="text-xs px-2 py-0">
+                              <Shield className="w-3 h-3 mr-1" />
+                              {member.role}
+                            </Badge>
+                            {member.username && (
+                              <span className="text-xs text-gray-400">@{member.username}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </td>
-                    <td className="py-3 px-4 text-gray-600">{member.knockedToday || 0}</td>
+                    <td className="py-3 px-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center text-sm text-gray-600">
+                          <Mail className="w-4 h-4 mr-2 text-gray-400" />
+                          {member.email}
+                        </div>
+                        {member.contactNumber && (
+                          <div className="flex items-center text-sm text-gray-600">
+                            <Phone className="w-4 h-4 mr-2 text-gray-400" />
+                            {member.contactNumber}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center text-sm">
+                          <Building className="w-4 h-4 mr-2 text-blue-500" />
+                          <span className="font-medium text-gray-900">
+                            {member.primaryTeamId?.name || 'Unassigned'}
+                          </span>
+                        </div>
+                        <div className="flex items-center text-sm">
+                          <MapPin className="w-4 h-4 mr-2 text-green-500" />
+                          <span className="text-gray-600">
+                            {member.primaryZoneId?.name || 'Unassigned'}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-gray-600">Today:</span>
+                          <span className="font-medium text-gray-900">{member.knockedToday || 0}</span>
+                        </div>
+                      </div>
+                    </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center">
                         <div className={`w-2 h-2 rounded-full mr-2 ${
                           member.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
                         }`}></div>
-                        <span className={`text-sm ${
-                          member.status === 'ACTIVE' ? 'text-green-600' : 'text-orange-600'
+                        <Badge className={`text-xs ${
+                          member.status === 'ACTIVE' 
+                            ? 'bg-green-100 text-green-800' 
+                            : 'bg-orange-100 text-orange-800'
                         }`}>
-                          {member.status === 'ACTIVE' ? 'Active' : 'Trial'}
-                        </span>
+                          {member.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                        </Badge>
                       </div>
                     </td>
                     <td className="py-3 px-4">

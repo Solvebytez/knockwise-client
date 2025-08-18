@@ -16,7 +16,7 @@ export function DashboardNavigation() {
 
   const getActiveTab = () => {
     if (pathname === "/dashboard") return "home"
-    if (pathname.includes("/territory-map")) return "territory"
+    if (pathname.includes("/territory-map") || pathname.includes("/create-and-assign-zone")) return "territory"
     if (pathname.includes("/routes")) return "routes"
     if (pathname.includes("/create-team")) return "team"
     return "home"
