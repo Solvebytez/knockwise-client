@@ -374,6 +374,15 @@ export function TerritoryMap() {
     const estimatedBuildings = Math.max(1, Math.floor(area / 500)) // Assume ~500 sq meters per building
     console.log(`Estimated buildings: ${estimatedBuildings}`)
 
+    // Generate realistic building numbers (even/odd pattern)
+    const buildingNumbers = []
+    const startNumber = Math.floor(Math.random() * 100) + 100 // Start between 100-199
+    for (let i = 0; i < estimatedBuildings; i++) {
+      // Alternate between even and odd numbers
+      const number = startNumber + (i * 2) + (i % 2)
+      buildingNumbers.push(number)
+    }
+
     // Generate sample addresses within the polygon
     const detectedResidents = []
     const geocoder = new window.google.maps.Geocoder()
@@ -399,11 +408,29 @@ export function TerritoryMap() {
             })
           })
 
-          const address = (result as any).formatted_address
+          const geocodedAddress = (result as any).formatted_address
+          const buildingNumber = buildingNumbers[i]
+          
+          // Create a realistic address with building number
+          let address = geocodedAddress
+          if (geocodedAddress && !geocodedAddress.match(/^\d+/)) {
+            // If the geocoded address doesn't start with a number, add our building number
+            const addressParts = geocodedAddress.split(',')
+            if (addressParts.length > 0) {
+              // Insert building number at the beginning
+              addressParts[0] = `${buildingNumber} ${addressParts[0].trim()}`
+              address = addressParts.join(', ')
+            }
+          } else if (geocodedAddress) {
+            // Replace existing number with our building number
+            address = geocodedAddress.replace(/^\d+/, buildingNumber.toString())
+          }
+
           const resident = {
             id: `resident-${Date.now()}-${i}`,
             name: `Resident ${i + 1}`,
             address: address,
+            buildingNumber: buildingNumber,
             lat: randomLat,
             lng: randomLng,
             status: 'not-visited' as const,
@@ -416,14 +443,16 @@ export function TerritoryMap() {
           }
 
           detectedResidents.push(resident)
-          console.log(`Detected resident: ${resident.name} at ${resident.address}`)
+          console.log(`Detected resident: ${resident.name} at ${resident.address} (Building #${buildingNumber})`)
         } catch (error) {
           console.log(`Geocoding error for point ${i}:`, error)
-          // Add resident with coordinates if geocoding fails
+          // Add resident with coordinates and building number if geocoding fails
+          const buildingNumber = buildingNumbers[i]
           const resident = {
             id: `resident-${Date.now()}-${i}`,
             name: `Resident ${i + 1}`,
-            address: `${randomLat.toFixed(6)}, ${randomLng.toFixed(6)}`,
+            address: `${buildingNumber} Building, ${randomLat.toFixed(6)}, ${randomLng.toFixed(6)}`,
+            buildingNumber: buildingNumber,
             lat: randomLat,
             lng: randomLng,
             status: 'not-visited' as const,
@@ -502,7 +531,7 @@ export function TerritoryMap() {
   // Load territories from backend
   const loadTerritoriesFromBackend = useCallback(async () => {
     try {
-      const response = await apiInstance.get('/zones/list-all')
+      const response = await apiInstance.get('/zones/list-all?showAll=true')
       if (response.data.success) {
         console.log('Territories loaded from backend:', response.data.data)
         console.log('Total territories found:', response.data.data.length)
@@ -817,7 +846,8 @@ export function TerritoryMap() {
         const defaultResidents = [{
           id: `resident-${Date.now()}`,
           name: "Resident 1",
-          address: "Address detection failed",
+          address: "100 Address detection failed",
+          buildingNumber: 100,
           lat: path[0].lat,
           lng: path[0].lng,
           status: 'not-visited' as const,
@@ -1609,8 +1639,8 @@ export function TerritoryMap() {
         )}
       </div>
 
-      <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto shadow-lg">
-        <div className="p-4 space-y-4 bg-white">
+        <div className="w-80 bg-white border-l border-gray-200 overflow-y-auto shadow-lg">
+          <div className="p-4 space-y-4 bg-white">
           {workflowStep === "drawing" && (
             <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6">
               <div className="pb-3">

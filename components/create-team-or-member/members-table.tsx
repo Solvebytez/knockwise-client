@@ -39,6 +39,7 @@ interface Member {
   username?: string
   role: 'SUPERADMIN' | 'SUBADMIN' | 'AGENT'
   status: 'ACTIVE' | 'INACTIVE'
+  assignmentStatus?: 'ASSIGNED' | 'UNASSIGNED'
   primaryTeamId?: {
     _id: string
     name: string
@@ -118,7 +119,7 @@ export function MembersTable() {
   const [searchTerm, setSearchTerm] = useState('')
   const [territoryFilter, setTerritoryFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [combinedStatusFilter, setCombinedStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedMember, setSelectedMember] = useState<DetailedMember | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -309,8 +310,18 @@ export function MembersTable() {
                          member.email.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesTerritory = territoryFilter === 'all' || member.primaryZoneId?.name === territoryFilter
     const matchesTeam = teamFilter === 'all' || member.primaryTeamId?.name === teamFilter
-    const matchesStatus = statusFilter === 'all' || member.status === statusFilter
-    return matchesSearch && matchesTerritory && matchesTeam && matchesStatus
+    
+    // Combined status filter logic
+    let matchesCombinedStatus = true
+    if (combinedStatusFilter !== 'all') {
+      if (combinedStatusFilter === 'ACTIVE' || combinedStatusFilter === 'INACTIVE') {
+        matchesCombinedStatus = member.status === combinedStatusFilter
+      } else if (combinedStatusFilter === 'ASSIGNED' || combinedStatusFilter === 'UNASSIGNED') {
+        matchesCombinedStatus = member.assignmentStatus === combinedStatusFilter
+      }
+    }
+    
+    return matchesSearch && matchesTerritory && matchesTeam && matchesCombinedStatus
   })
 
   // Pagination
@@ -388,17 +399,16 @@ export function MembersTable() {
                    ))}
                  </SelectContent>
                </Select>
-               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                 <SelectTrigger className="w-32 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
+               <Select value={combinedStatusFilter} onValueChange={setCombinedStatusFilter}>
+                 <SelectTrigger className="w-40 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
                    <SelectValue placeholder="All Status" />
                  </SelectTrigger>
                  <SelectContent>
                    <SelectItem value="all">All Status</SelectItem>
-                   {Array.from(new Set(members.map(member => member.status))).map(status => (
-                     <SelectItem key={status} value={status}>
-                       {status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                     </SelectItem>
-                   ))}
+                   <SelectItem value="ACTIVE">Active</SelectItem>
+                   <SelectItem value="INACTIVE">Inactive</SelectItem>
+                   <SelectItem value="ASSIGNED">Assigned</SelectItem>
+                   <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
                  </SelectContent>
                </Select>
             </div>
@@ -488,17 +498,31 @@ export function MembersTable() {
                       </div>
                     </td>
                     <td className="py-3 px-4">
-                      <div className="flex items-center">
-                        <div className={`w-2 h-2 rounded-full mr-2 ${
-                          member.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
-                        }`}></div>
-                        <Badge className={`text-xs ${
-                          member.status === 'ACTIVE' 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-orange-100 text-orange-800'
-                        }`}>
-                          {member.status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                        </Badge>
+                      <div className="space-y-1">
+                        <div className="flex items-center">
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            member.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
+                          }`}></div>
+                          <Badge className={`text-xs ${
+                            member.status === 'ACTIVE' 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-orange-100 text-orange-800'
+                          }`}>
+                            {member.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center">
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            member.assignmentStatus === 'ASSIGNED' ? 'bg-blue-500' : 'bg-gray-400'
+                          }`}></div>
+                          <Badge className={`text-xs ${
+                            member.assignmentStatus === 'ASSIGNED' 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {member.assignmentStatus === 'ASSIGNED' ? 'Assigned' : 'Unassigned'}
+                          </Badge>
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -671,6 +695,19 @@ export function MembersTable() {
                             detailedMember.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
                           }`}></div>
                           {detailedMember.status === 'ACTIVE' ? 'Active' : 'Trial'}
+                        </Badge>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-600 mb-1 block">Assignment Status</label>
+                        <Badge className={`px-3 py-1 text-sm font-medium ${
+                          detailedMember.assignmentStatus === 'ASSIGNED' 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            detailedMember.assignmentStatus === 'ASSIGNED' ? 'bg-blue-500' : 'bg-gray-400'
+                          }`}></div>
+                          {detailedMember.assignmentStatus === 'ASSIGNED' ? 'Assigned' : 'Unassigned'}
                         </Badge>
                       </div>
                     </div>

@@ -58,6 +58,7 @@ interface Team {
   description?: string
   superadminId: string
   status: 'ACTIVE' | 'INACTIVE'
+  assignmentStatus?: 'ASSIGNED' | 'UNASSIGNED'
   leaderId: {
     _id: string
     name: string
@@ -68,12 +69,15 @@ interface Team {
     name: string
     email: string
     status: 'ACTIVE' | 'INACTIVE'
+    assignmentStatus?: 'ASSIGNED' | 'UNASSIGNED'
   }>
   createdAt: string
   updatedAt: string
   performance?: {
     totalMembers: number
     activeMembers: number
+    assignedMembers?: number
+    unassignedMembers?: number
     averageKnocks: number
     completionRate: number
     zoneCoverage: number
@@ -117,6 +121,7 @@ export function TeamMembersTable() {
   const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [assignmentStatusFilter, setAssignmentStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [teamToDelete, setTeamToDelete] = useState<Team | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
@@ -163,7 +168,21 @@ export function TeamMembersTable() {
     const matchesStatus = statusFilter === 'all' || 
                          (statusFilter === 'active' && team.status === 'ACTIVE') ||
                          (statusFilter === 'inactive' && team.status === 'INACTIVE')
-    return matchesSearch && matchesStatus
+    
+    // Filter by assignment status
+    let matchesAssignmentStatus = true
+    if (assignmentStatusFilter !== 'all') {
+      const assignedMembers = team.agentIds.filter(agent => agent.assignmentStatus === 'ASSIGNED').length
+      const unassignedMembers = team.agentIds.filter(agent => agent.assignmentStatus === 'UNASSIGNED').length
+      
+      if (assignmentStatusFilter === 'assigned' && assignedMembers === 0) {
+        matchesAssignmentStatus = false
+      } else if (assignmentStatusFilter === 'unassigned' && unassignedMembers === 0) {
+        matchesAssignmentStatus = false
+      }
+    }
+    
+    return matchesSearch && matchesStatus && matchesAssignmentStatus
   })
 
   // Pagination
@@ -288,6 +307,16 @@ export function TeamMembersTable() {
                   <SelectItem value="inactive">Inactive Teams</SelectItem>
                 </SelectContent>
               </Select>
+              <Select value={assignmentStatusFilter} onValueChange={setAssignmentStatusFilter}>
+                <SelectTrigger className="w-40 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
+                  <SelectValue placeholder="All Assignment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Assignment</SelectItem>
+                  <SelectItem value="assigned">Has Assigned Members</SelectItem>
+                  <SelectItem value="unassigned">Has Unassigned Members</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
                          <div className="flex items-center space-x-2">
                <Button 
@@ -314,7 +343,7 @@ export function TeamMembersTable() {
                   <th className="text-left py-3 px-4 font-medium">Leader</th>
                   <th className="text-left py-3 px-4 font-medium">Members</th>
                   <th className="text-left py-3 px-4 font-medium">Performance</th>
-                  <th className="text-left py-3 px-4 font-medium">Status</th>
+                                     <th className="text-left py-3 px-4 font-medium">Status & Assignment</th>
                   <th className="text-left py-3 px-4 font-medium">Created</th>
                   <th className="text-left py-3 px-4 font-medium">Actions</th>
                 </tr>
@@ -383,20 +412,34 @@ export function TeamMembersTable() {
                         </div>
                       </div>
                     </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center">
-                        <div className={`w-2 h-2 rounded-full mr-2 ${
-                          team.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
-                        }`}></div>
-                        <Badge className={`text-xs ${
-                          team.status === 'ACTIVE'
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-orange-100 text-orange-800'
-                        }`}>
-                          {team.status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </div>
-                    </td>
+                                         <td className="py-3 px-4">
+                       <div className="space-y-1">
+                         <div className="flex items-center">
+                           <div className={`w-2 h-2 rounded-full mr-2 ${
+                             team.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
+                           }`}></div>
+                           <Badge className={`text-xs ${
+                             team.status === 'ACTIVE'
+                               ? 'bg-green-100 text-green-800' 
+                               : 'bg-orange-100 text-orange-800'
+                           }`}>
+                             {team.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                           </Badge>
+                         </div>
+                         <div className="flex items-center">
+                           <div className={`w-2 h-2 rounded-full mr-2 ${
+                             team.assignmentStatus === 'ASSIGNED' ? 'bg-blue-500' : 'bg-gray-500'
+                           }`}></div>
+                           <Badge className={`text-xs ${
+                             team.assignmentStatus === 'ASSIGNED'
+                               ? 'bg-blue-100 text-blue-800' 
+                               : 'bg-gray-100 text-gray-800'
+                           }`}>
+                             {team.assignmentStatus === 'ASSIGNED' ? 'Assigned' : 'Unassigned'}
+                           </Badge>
+                         </div>
+                       </div>
+                     </td>
                     <td className="py-3 px-4">
                       <div className="text-sm text-gray-600">
                         {formatDate(team.createdAt)}
@@ -549,32 +592,36 @@ export function TeamMembersTable() {
                      </CardContent>
                    </Card>
 
-                  {/* Performance Overview */}
-                                     <Card className="border-gray-200">
-                     <CardHeader className="pb-3">
-                       <CardTitle className="text-base font-semibold text-gray-900">Performance Overview</CardTitle>
-                     </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                                 <div className="text-center p-4 bg-green-50 rounded-lg">
-                           <div className="text-xl font-bold text-green-600">{detailedTeam.performance?.totalMembers || detailedTeam.agentIds.length}</div>
-                           <div className="text-xs text-gray-600">Total Members</div>
-                         </div>
-                         <div className="text-center p-4 bg-blue-50 rounded-lg">
-                           <div className="text-xl font-bold text-blue-600">{detailedTeam.performance?.activeMembers || detailedTeam.agentIds.filter(agent => agent.status === 'ACTIVE').length}</div>
-                           <div className="text-xs text-gray-600">Active Members</div>
-                         </div>
-                         <div className="text-center p-4 bg-purple-50 rounded-lg">
-                           <div className="text-xl font-bold text-purple-600">{detailedTeam.performance?.averageKnocks || 0}</div>
-                           <div className="text-xs text-gray-600">Avg Knocks</div>
-                         </div>
-                         <div className="text-center p-4 bg-orange-50 rounded-lg">
-                           <div className="text-xl font-bold text-orange-600">{detailedTeam.performance?.completionRate || 0}%</div>
-                           <div className="text-xs text-gray-600">Completion Rate</div>
-                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                                     {/* Performance Overview */}
+                                      <Card className="border-gray-200">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base font-semibold text-gray-900">Performance Overview</CardTitle>
+                      </CardHeader>
+                     <CardContent>
+                       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                                  <div className="text-center p-4 bg-green-50 rounded-lg">
+                            <div className="text-xl font-bold text-green-600">{detailedTeam.performance?.totalMembers || detailedTeam.agentIds.length}</div>
+                            <div className="text-xs text-gray-600">Total Members</div>
+                          </div>
+                          <div className="text-center p-4 bg-blue-50 rounded-lg">
+                            <div className="text-xl font-bold text-blue-600">{detailedTeam.performance?.activeMembers || detailedTeam.agentIds.filter(agent => agent.status === 'ACTIVE').length}</div>
+                            <div className="text-xs text-gray-600">Active Members</div>
+                          </div>
+                          <div className="text-center p-4 bg-purple-50 rounded-lg">
+                            <div className="text-xl font-bold text-purple-600">{detailedTeam.agentIds.filter(agent => agent.assignmentStatus === 'ASSIGNED').length}</div>
+                            <div className="text-xs text-gray-600">Assigned Members</div>
+                          </div>
+                          <div className="text-center p-4 bg-orange-50 rounded-lg">
+                            <div className="text-xl font-bold text-orange-600">{detailedTeam.agentIds.filter(agent => agent.assignmentStatus === 'UNASSIGNED').length}</div>
+                            <div className="text-xs text-gray-600">Unassigned Members</div>
+                          </div>
+                          <div className="text-center p-4 bg-indigo-50 rounded-lg">
+                            <div className="text-xl font-bold text-indigo-600">{detailedTeam.assignmentStatus === 'ASSIGNED' ? 'Yes' : 'No'}</div>
+                            <div className="text-xs text-gray-600">Team Assigned</div>
+                          </div>
+                       </div>
+                     </CardContent>
+                   </Card>
 
                   {/* Team Members */}
                                      <Card className="border-gray-200">

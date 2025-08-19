@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, forwardRef, useImperativeHandle } from "react"
+import { useRouter } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -113,7 +114,7 @@ interface Territory {
     effectiveTo?: string
     status: string
   }
-  status: 'ACTIVE' | 'INACTIVE' | 'DRAFT' | 'SCHEDULED'
+  status: 'ACTIVE' | 'INACTIVE' | 'DRAFT' | 'SCHEDULED' | 'COMPLETED'
   totalResidents?: number
   activeResidents?: number
   completionRate?: number
@@ -155,6 +156,7 @@ interface TerritoryStats {
   activeTerritories: number
   scheduledTerritories: number
   draftTerritories: number
+  completedTerritories: number
   assignedTerritories: number
   unassignedTerritories: number
   totalResidents: number
@@ -309,7 +311,7 @@ const mockTerritories: Territory[] = [
         _id: 'team1',
         name: 'team 1'
       },
-      effectiveFrom: '2025-08-21T00:00:00.000Z',
+              effectiveFrom: '2025-08-21T00:00:00.000Z',
       status: 'PENDING'
     },
     status: 'SCHEDULED',
@@ -359,6 +361,7 @@ const mockStats: TerritoryStats = {
   activeTerritories: 0,
   scheduledTerritories: 4,
   draftTerritories: 0,
+  completedTerritories: 0,
   assignedTerritories: 4,
   unassignedTerritories: 0,
   totalResidents: 69, // 10+15+25+19 from the territories
@@ -405,7 +408,7 @@ const mockStats: TerritoryStats = {
 
 const fetchTerritories = async (): Promise<Territory[]> => {
   try {
-    const response = await apiInstance.get('/zones/list-all')
+    const response = await apiInstance.get('/zones/list-all?showAll=true')
     return response.data.data || []
   } catch (error) {
     console.error('Error fetching territories:', error)
@@ -466,6 +469,7 @@ const calculateDynamicStats = (territories: Territory[]): TerritoryStats => {
   const activeTerritories = territories.filter(t => t.status === 'ACTIVE').length
   const scheduledTerritories = territories.filter(t => t.status === 'SCHEDULED').length
   const draftTerritories = territories.filter(t => t.status === 'DRAFT').length
+  const completedTerritories = territories.filter(t => t.status === 'COMPLETED').length
   const assignedTerritories = territories.filter(t => t.currentAssignment).length
   const unassignedTerritories = totalTerritories - assignedTerritories
   
@@ -489,6 +493,7 @@ const calculateDynamicStats = (territories: Territory[]): TerritoryStats => {
     activeTerritories,
     scheduledTerritories,
     draftTerritories,
+    completedTerritories,
     assignedTerritories,
     unassignedTerritories,
     totalResidents,
@@ -535,6 +540,7 @@ const calculateDynamicStats = (territories: Territory[]): TerritoryStats => {
 }
 
 export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props, ref) => {
+  const router = useRouter()
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
@@ -543,6 +549,9 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
   const [territoryToDelete, setTerritoryToDelete] = useState<Territory | null>(null)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [showTeamMembers, setShowTeamMembers] = useState(false)
+  const [teamMembers, setTeamMembers] = useState<any[]>([])
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false)
 
   const { data: territories = [], isLoading, error, refetch } = useQuery({
     queryKey: ['territories'],
@@ -581,6 +590,28 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
   const handleViewDetails = (territory: Territory) => {
     setSelectedTerritory(territory)
     setIsViewDetailsOpen(true)
+    setShowTeamMembers(false)
+    setTeamMembers([])
+  }
+
+  const handleSeeMembers = async () => {
+    if (!selectedTerritory) return
+    
+    const teamId = selectedTerritory.teamId?._id || selectedTerritory.currentAssignment?.teamId?._id
+    if (!teamId) return
+
+    setIsLoadingMembers(true)
+    try {
+      const response = await apiInstance.get(`/teams/${teamId}`)
+      if (response.data.success && response.data.data.agentIds) {
+        setTeamMembers(response.data.data.agentIds)
+      }
+    } catch (error) {
+      console.error('Error fetching team members:', error)
+      toast.error('Failed to load team members')
+    } finally {
+      setIsLoadingMembers(false)
+    }
   }
 
   const handleDeleteTerritory = (territory: Territory) => {
@@ -638,6 +669,8 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
         return 'bg-gray-100 text-gray-800'
       case 'SCHEDULED':
         return 'bg-blue-100 text-blue-800'
+      case 'COMPLETED':
+        return 'bg-purple-100 text-purple-800'
       default:
         return 'bg-gray-100 text-gray-800'
     }
@@ -680,7 +713,7 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
           <CardContent>
             <div className="text-2xl font-bold text-gray-900">{stats.totalTerritories}</div>
             <div className="text-xs text-gray-500 mt-1">
-              {stats.activeTerritories} active, {stats.scheduledTerritories || 0} scheduled, {stats.draftTerritories || 0} draft
+              {stats.activeTerritories} active, {stats.scheduledTerritories || 0} scheduled, {stats.draftTerritories || 0} draft, {stats.completedTerritories || 0} completed
             </div>
           </CardContent>
         </Card>
@@ -769,6 +802,7 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                   <SelectItem value="INACTIVE">Inactive</SelectItem>
                   <SelectItem value="DRAFT">Draft</SelectItem>
                   <SelectItem value="SCHEDULED">Scheduled</SelectItem>
+                  <SelectItem value="COMPLETED">Completed</SelectItem>
                 </SelectContent>
               </Select>
               <Select value={teamFilter} onValueChange={setTeamFilter}>
@@ -939,10 +973,10 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                             <Eye className="mr-2 h-4 w-4" />
                             View Details
                           </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit Territory
-                          </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => router.push(`/territory-map/${territory._id}`)}>
+          <Edit className="mr-2 h-4 w-4" />
+          Edit Territory
+        </DropdownMenuItem>
                           <DropdownMenuItem>
                             <Map className="mr-2 h-4 w-4" />
                             View on Map
@@ -1007,32 +1041,94 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
                 </CardContent>
               </Card>
 
-              {/* Assignment Information */}
-              <Card className="border-gray-200">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-base font-semibold text-gray-900">Assignment Information</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Assigned Agent:</span>
-                    <span className="font-medium text-gray-900">
-                      {selectedTerritory.assignedAgentId ? selectedTerritory.assignedAgentId.name : 'Unassigned'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Agent Email:</span>
-                    <span className="font-medium text-gray-900">
-                      {selectedTerritory.assignedAgentId ? selectedTerritory.assignedAgentId.email : 'N/A'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Team:</span>
-                    <span className="font-medium text-gray-900">
-                      {selectedTerritory.teamId ? selectedTerritory.teamId.name : 'No team assigned'}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
+                             {/* Assignment Information */}
+               <Card className="border-gray-200">
+                 <CardHeader className="pb-3">
+                   <CardTitle className="text-base font-semibold text-gray-900">Assignment Information</CardTitle>
+                 </CardHeader>
+                 <CardContent className="space-y-3">
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Assigned Agent:</span>
+                     <span className="font-medium text-gray-900">
+                       {selectedTerritory.assignedAgentId ? selectedTerritory.assignedAgentId.name : 
+                        selectedTerritory.currentAssignment?.teamId ? 'Team Assignment' : 'Unassigned'}
+                     </span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Agent Email:</span>
+                     <span className="font-medium text-gray-900">
+                       {selectedTerritory.assignedAgentId ? selectedTerritory.assignedAgentId.email : 
+                        selectedTerritory.currentAssignment?.teamId ? 'Team Assignment' : 'N/A'}
+                     </span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Team:</span>
+                     <span className="font-medium text-gray-900">
+                       {selectedTerritory.teamId ? selectedTerritory.teamId.name : 
+                        selectedTerritory.currentAssignment?.teamId ? selectedTerritory.currentAssignment.teamId.name : 
+                        'No team assigned'}
+                     </span>
+                   </div>
+                   
+                   {/* See Members Button - Only show if there's a team assignment */}
+                   {(selectedTerritory.teamId || selectedTerritory.currentAssignment?.teamId) && (
+                     <div className="pt-3 border-t border-gray-100">
+                       <Button
+                         variant="outline"
+                         size="sm"
+                         onClick={() => {
+                           if (!showTeamMembers) {
+                             handleSeeMembers()
+                           }
+                           setShowTeamMembers(!showTeamMembers)
+                         }}
+                         className="w-full"
+                         disabled={isLoadingMembers}
+                       >
+                         <Users className="w-4 h-4 mr-2" />
+                         {isLoadingMembers ? 'Loading...' : showTeamMembers ? 'Hide Members' : 'See Members'}
+                       </Button>
+                     </div>
+                   )}
+                   
+                   {/* Team Members List - Expandable */}
+                   {showTeamMembers && (
+                     <div className="pt-3 border-t border-gray-100">
+                       <h4 className="text-sm font-medium text-gray-900 mb-3">Team Members</h4>
+                       {isLoadingMembers ? (
+                         <div className="flex items-center justify-center py-4">
+                           <div className="text-gray-500">Loading members...</div>
+                         </div>
+                                               ) : teamMembers.length > 0 ? (
+                          <div className="space-y-2 max-h-40 overflow-y-auto">
+                            {teamMembers.map((member: any, index: number) => (
+                             <div key={member._id || index} className="flex items-center space-x-3 p-2 bg-gray-50 rounded-lg">
+                               <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
+                                 <UserCheck className="w-4 h-4 text-blue-600" />
+                               </div>
+                               <div className="flex-1 min-w-0">
+                                 <p className="text-sm font-medium text-gray-900 truncate">{member.name}</p>
+                                 <p className="text-xs text-gray-500 truncate">{member.email}</p>
+                               </div>
+                                                               <Badge className={`text-xs ${
+                                  member.assignmentStatus === 'ASSIGNED' 
+                                    ? 'bg-green-100 text-green-800 border-green-200' 
+                                    : 'bg-gray-100 text-gray-800 border-gray-200'
+                                }`}>
+                                  {member.assignmentStatus || 'UNASSIGNED'}
+                                                                </Badge>
+                              </div>
+                            ))}
+                          </div>
+                       ) : (
+                         <div className="text-center py-4 text-gray-500">
+                           No members found in this team
+                         </div>
+                       )}
+                     </div>
+                   )}
+                 </CardContent>
+               </Card>
 
               {/* Performance Overview */}
               <Card className="border-gray-200">

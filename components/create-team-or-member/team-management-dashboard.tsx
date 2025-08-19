@@ -30,6 +30,8 @@ interface TeamStats {
   totalMembers: number
   activeMembers: number
   inactiveMembers: number
+  assignedMembers: number
+  unassignedMembers: number
   inactiveTeams: number
   totalZones: number
   averagePerformance: number
@@ -65,6 +67,8 @@ const fetchTeamStats = async (): Promise<TeamStats> => {
       totalMembers: 0,
       activeMembers: 0,
       inactiveMembers: 0,
+      assignedMembers: 0,
+      unassignedMembers: 0,
       inactiveTeams: 0,
       totalZones: 0,
       averagePerformance: 0,
@@ -141,20 +145,20 @@ export function TeamManagementDashboard() {
       change: `${stats?.recentActivity?.newMembers || 0} new this month`
     },
     {
-      title: "Inactive Teams",
-      value: stats?.inactiveTeams || 0,
-      icon: UserX,
-      color: "text-red-600",
-      bgColor: "bg-red-50",
-      change: "No work/territory assigned"
+      title: "Assigned Members",
+      value: stats?.assignedMembers || 0,
+      icon: UserPlus,
+      color: "text-blue-600",
+      bgColor: "bg-blue-50",
+      change: `${stats?.assignedMembers || 0} have zones`
     },
     {
-      title: "Total Zones",
-      value: stats?.totalZones || 0,
-      icon: MapPin,
-      color: "text-purple-600",
-      bgColor: "bg-purple-50",
-      change: `${stats?.totalZones || 0} zones covered`
+      title: "Unassigned Members",
+      value: stats?.unassignedMembers || 0,
+      icon: UserX,
+      color: "text-orange-600",
+      bgColor: "bg-orange-50",
+      change: "No zones assigned"
     }
   ]
 

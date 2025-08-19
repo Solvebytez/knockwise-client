@@ -11,6 +11,9 @@ interface TeamOverview {
   activeAgents: number
   inactiveAgents: number
   agentsThisMonth: number
+  assignedAgents: number
+  unassignedAgents: number
+  totalZones: number
 }
 
 interface RecentAgent {
@@ -36,7 +39,10 @@ const fetchTeamOverview = async (): Promise<TeamOverview> => {
       totalAgents: 0,
       activeAgents: 0,
       inactiveAgents: 0,
-      agentsThisMonth: 0
+      agentsThisMonth: 0,
+      assignedAgents: 0,
+      unassignedAgents: 0,
+      totalZones: 0
     }
   }
 }
@@ -79,18 +85,18 @@ export function QuickStats() {
       bgColor: "bg-green-50"
     },
     {
-      title: "Inactive Agents",
-      value: overview?.inactiveAgents || 0,
-      icon: UserX,
-      color: "text-red-600",
-      bgColor: "bg-red-50"
+      title: "Assigned Agents",
+      value: overview?.assignedAgents || 0,
+      icon: UserCheck,
+      color: "text-blue-600",
+      bgColor: "bg-blue-50"
     },
     {
-      title: "This Month",
-      value: overview?.agentsThisMonth || 0,
-      icon: TrendingUp,
-      color: "text-purple-600",
-      bgColor: "bg-purple-50"
+      title: "Unassigned Members",
+      value: overview?.unassignedAgents || 0,
+      icon: UserX,
+      color: "text-orange-600",
+      bgColor: "bg-orange-50"
     }
   ]
 
