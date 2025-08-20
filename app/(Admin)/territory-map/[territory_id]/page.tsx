@@ -8,6 +8,7 @@ import { TerritoryEditSidebar } from "@/components/territory-edit-sidebar"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft } from "lucide-react"
 import { apiInstance } from "@/lib/apiInstance"
+import { updateTerritoryBasic, updateTerritoryBoundary, updateTerritoryResidents, updateTerritoryUnified } from "@/lib/territoryApi"
 import { toast } from "sonner"
 
 // Types
@@ -60,11 +61,12 @@ const fetchTeams = async (): Promise<Team[]> => {
   return response.data.data
 }
 
+// Legacy update function (kept for backward compatibility)
 const updateTerritory = async ({ id, data }: { id: string; data: any }) => {
-  console.log('Sending update data:', { id, data })
+  console.log('Sending legacy update data:', { id, data })
   const response = await apiInstance.put(`/zones/update/${id}`, data)
-  console.log('Update response:', response.data)
-  return response.data.data // Return the actual zone data
+  console.log('Legacy update response:', response.data)
+  return response.data.data
 }
 
 function TerritoryEditContent() {
@@ -147,6 +149,7 @@ function TerritoryEditContent() {
   })
 
   // Mutation
+  // Legacy mutation (for backward compatibility)
   const updateMutation = useMutation({
     mutationFn: updateTerritory,
     onSuccess: (data) => {
@@ -174,8 +177,174 @@ function TerritoryEditContent() {
     },
   })
 
+  // Specific update mutations
+  const updateBasicMutation = useMutation({
+    mutationFn: updateTerritoryBasic,
+    onMutate: async (variables) => {
+      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ['territory', territoryId] })
+
+      // Snapshot the previous value
+      const previousTerritory = queryClient.getQueryData(['territory', territoryId])
+
+      // Optimistically update to the new value while preserving status
+      queryClient.setQueryData(['territory', territoryId], (old: any) => {
+        console.log('Optimistic update - old data:', old)
+        const updated = {
+          ...old,
+          name: variables.data.name !== undefined ? variables.data.name : old.name,
+          description: variables.data.description !== undefined ? variables.data.description : old.description,
+          // Explicitly preserve the current status
+          status: old.status
+        }
+        console.log('Optimistic update - new data:', updated)
+        return updated
+      })
+
+      // Return a context object with the snapshotted value
+      return { previousTerritory }
+    },
+    onSuccess: (data) => {
+      toast.success('Territory basic information updated successfully!')
+      console.log('Basic update successful, new data:', data)
+      
+      // Update the cache with the actual response data from backend
+      queryClient.setQueryData(['territory', territoryId], (old: any) => {
+        const updated = {
+          ...data,
+          // Use the actual status from backend response, not cached status
+          status: data.status
+        }
+        console.log('Success update - final data:', updated)
+        return updated
+      })
+      
+      // Force refresh to ensure UI shows correct status from backend
+      queryClient.invalidateQueries({ queryKey: ['territory', territoryId] })
+      queryClient.invalidateQueries({ queryKey: ['territories'] })
+      
+      // Refetch immediately to ensure data consistency
+      refetchTerritory()
+    },
+    onError: (error: any, variables, context) => {
+      console.error('Basic update error:', error.response?.data)
+      toast.error(error.response?.data?.message || 'Failed to update territory basic information')
+      
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousTerritory) {
+        queryClient.setQueryData(['territory', territoryId], context.previousTerritory)
+      }
+    },
+  })
+
+  const updateBoundaryMutation = useMutation({
+    mutationFn: updateTerritoryUnified,
+    onMutate: async (variables) => {
+      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ['territory', territoryId] })
+
+      // Snapshot the previous value
+      const previousTerritory = queryClient.getQueryData(['territory', territoryId])
+
+      // Optimistically update to the new value while preserving status
+      queryClient.setQueryData(['territory', territoryId], (old: any) => {
+        console.log('Boundary optimistic update - old data:', old)
+        const updated = {
+          ...old,
+          boundary: variables.data.boundary,
+          buildingData: variables.data.buildingData,
+          // Preserve the current status
+          status: old.status
+        }
+        console.log('Boundary optimistic update - new data:', updated)
+        return updated
+      })
+
+      // Return a context object with the snapshotted value
+      return { previousTerritory }
+    },
+    onSuccess: (data) => {
+      toast.success('Territory boundary and residents updated successfully!')
+      console.log('Boundary update successful, new data:', data)
+      
+      // Update the cache with the actual response data from backend
+      queryClient.setQueryData(['territory', territoryId], (old: any) => {
+        const updated = {
+          ...data,
+          // Use the actual status from backend response, not cached status
+          status: data.status
+        }
+        console.log('Boundary success update - final data:', updated)
+        return updated
+      })
+      
+      // Force refresh to ensure UI shows correct status from backend
+      queryClient.invalidateQueries({ queryKey: ['territory', territoryId] })
+      queryClient.invalidateQueries({ queryKey: ['territories'] })
+      
+      // Refetch immediately to ensure data consistency
+      refetchTerritory()
+      
+      // Reset states after successful update
+      setPendingBoundary(null)
+      setDetectedBuildings([])
+      setIsEditingBoundary(false)
+    },
+    onError: (error: any, variables, context) => {
+      console.error('Boundary update error:', error.response?.data)
+      toast.error(error.response?.data?.message || 'Failed to update territory boundary')
+      
+      // If the mutation fails, use the context returned from onMutate to roll back
+      if (context?.previousTerritory) {
+        queryClient.setQueryData(['territory', territoryId], context.previousTerritory)
+      }
+    },
+  })
+
+  const updateResidentsMutation = useMutation({
+    mutationFn: updateTerritoryResidents,
+    onSuccess: (data) => {
+      toast.success('Territory residents updated successfully!')
+      console.log('Residents update successful, new data:', data)
+      
+      // Also invalidate queries to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ['territory', territoryId] })
+      queryClient.invalidateQueries({ queryKey: ['territories'] })
+      
+      // Refetch territory data to ensure UI is updated
+      refetchTerritory()
+    },
+    onError: (error: any) => {
+      console.error('Residents update error:', error.response?.data)
+      toast.error(error.response?.data?.message || 'Failed to update territory residents')
+    },
+  })
+
   const handleUpdate = (updateData: any) => {
-    updateMutation.mutate({ id: territoryId, data: updateData })
+    // Check if this is only a name/description change (no assignment changes)
+    const isOnlyNameDescriptionChange = !updateData.assignedAgentId &&
+                                      !updateData.teamId &&
+                                      !updateData.effectiveFrom &&
+                                      !updateData.removeAssignment &&
+                                      (updateData.name || updateData.description) &&
+                                      !pendingBoundary
+
+    if (isOnlyNameDescriptionChange) {
+      console.log('Processing name/description update with unified API')
+      
+      // Use the unified API for basic updates
+      const basicUpdateData = {
+        name: updateData.name,
+        description: updateData.description
+      }
+      
+      console.log('Sending basic update with data:', basicUpdateData)
+      updateBasicMutation.mutate({ id: territoryId, data: basicUpdateData })
+    } else {
+      // For ALL assignment changes (including date changes), use the legacy API since it handles assignment logic
+      console.log('Processing assignment update with legacy API')
+      updateMutation.mutate({ id: territoryId, data: updateData })
+    }
   }
 
   const handleFocusTerritory = () => {
@@ -201,36 +370,38 @@ function TerritoryEditContent() {
     const area = window.google.maps.geometry.spherical.computeArea(path)
     console.log(`Polygon area: ${area} square meters`)
 
-    // Estimate buildings based on area (rough calculation)
-    const estimatedBuildings = Math.max(1, Math.floor(area / 500)) // Assume ~500 sq meters per building
+    // Estimate buildings based on area (more accurate for residential areas)
+    // Residential lots are typically much smaller - around 150-200 sq meters per building
+    const estimatedBuildings = Math.max(1, Math.floor(area / 150)) // Assume ~150 sq meters per building
     console.log(`Estimated buildings: ${estimatedBuildings}`)
 
     // Generate sample addresses within the polygon
     const detectedResidents = []
     const geocoder = new window.google.maps.Geocoder()
 
-    // Generate realistic building numbers (even/odd pattern)
-    const buildingNumbers = []
-    const startNumber = Math.floor(Math.random() * 100) + 100 // Start between 100-199
-    for (let i = 0; i < estimatedBuildings; i++) {
-      // Alternate between even and odd numbers
-      const number = startNumber + (i * 2) + (i % 2)
-      buildingNumbers.push(number)
-    }
+    // Use a more systematic approach - create a grid of points within the bounds
+    const latStep = (bounds.getNorthEast().lat() - bounds.getSouthWest().lat()) / Math.sqrt(estimatedBuildings)
+    const lngStep = (bounds.getNorthEast().lng() - bounds.getSouthWest().lng()) / Math.sqrt(estimatedBuildings)
+    
+    let buildingCount = 0
+    const maxAttempts = estimatedBuildings * 2 // Allow more attempts to find buildings
 
-    for (let i = 0; i < estimatedBuildings; i++) {
-      // Generate random point within polygon bounds
-      const randomLat = bounds.getSouthWest().lat() + Math.random() * (bounds.getNorthEast().lat() - bounds.getSouthWest().lat())
-      const randomLng = bounds.getSouthWest().lng() + Math.random() * (bounds.getNorthEast().lng() - bounds.getSouthWest().lng())
+    for (let i = 0; i < maxAttempts && buildingCount < estimatedBuildings; i++) {
+      // Use systematic grid points instead of completely random
+      const gridRow = Math.floor(i / Math.sqrt(estimatedBuildings))
+      const gridCol = i % Math.sqrt(estimatedBuildings)
       
-      const randomPoint = new window.google.maps.LatLng(randomLat, randomLng)
+      const lat = bounds.getSouthWest().lat() + (gridRow * latStep) + (Math.random() * latStep * 0.5)
+      const lng = bounds.getSouthWest().lng() + (gridCol * lngStep) + (Math.random() * lngStep * 0.5)
+      
+      const point = new window.google.maps.LatLng(lat, lng)
       
       // Check if point is inside polygon
-      if (window.google.maps.geometry.poly.containsLocation(randomPoint, polygon)) {
+      if (window.google.maps.geometry.poly.containsLocation(point, polygon)) {
         try {
           // Reverse geocode to get address
           const result = await new Promise((resolve, reject) => {
-            geocoder.geocode({ location: randomPoint }, (results, status) => {
+            geocoder.geocode({ location: point }, (results, status) => {
               if (status === 'OK' && results && results[0]) {
                 resolve(results[0])
               } else {
@@ -240,30 +411,25 @@ function TerritoryEditContent() {
           })
 
           const geocodedAddress = (result as any).formatted_address
-          const buildingNumber = buildingNumbers[i]
           
-          // Create a realistic address with building number
-          let address = geocodedAddress
-          if (geocodedAddress && !geocodedAddress.match(/^\d+/)) {
-            // If the geocoded address doesn't start with a number, add our building number
-            const addressParts = geocodedAddress.split(',')
-            if (addressParts.length > 0) {
-              // Insert building number at the beginning
-              addressParts[0] = `${buildingNumber} ${addressParts[0].trim()}`
-              address = addressParts.join(', ')
-            }
-          } else if (geocodedAddress) {
-            // Replace existing number with our building number
-            address = geocodedAddress.replace(/^\d+/, buildingNumber.toString())
-          }
+          // Extract house number from the geocoded address
+          const extractHouseNumber = (address: string): number => {
+            const match = address.match(/^(\d+)/);
+            return match ? parseInt(match[1], 10) : 0;
+          };
+          
+          const buildingNumber = extractHouseNumber(geocodedAddress);
+          
+          // Use the actual geocoded address as-is, don't modify it
+          const address = geocodedAddress;
 
           const resident = {
-            id: `resident-${Date.now()}-${i}`,
-            name: `Resident ${i + 1}`,
+            id: `resident-${Date.now()}-${buildingCount}`,
+            name: `Resident ${buildingCount + 1}`,
             address: address,
             buildingNumber: buildingNumber,
-            lat: randomLat,
-            lng: randomLng,
+            lat: lat,
+            lng: lng,
             status: 'not-visited' as const,
             phone: '',
             email: '',
@@ -274,18 +440,18 @@ function TerritoryEditContent() {
           }
 
           detectedResidents.push(resident)
+          buildingCount++
           console.log(`Detected resident: ${resident.name} at ${resident.address} (Building #${buildingNumber})`)
         } catch (error) {
           console.log(`Geocoding error for point ${i}:`, error)
-          // Add resident with coordinates and building number if geocoding fails
-          const buildingNumber = buildingNumbers[i]
+          // Add resident with coordinates if geocoding fails
           const resident = {
-            id: `resident-${Date.now()}-${i}`,
-            name: `Resident ${i + 1}`,
-            address: `${buildingNumber} Building, ${randomLat.toFixed(6)}, ${randomLng.toFixed(6)}`,
-            buildingNumber: buildingNumber,
-            lat: randomLat,
-            lng: randomLng,
+            id: `resident-${Date.now()}-${buildingCount}`,
+            name: `Resident ${buildingCount + 1}`,
+            address: `Building at ${lat.toFixed(6)}, ${lng.toFixed(6)}`,
+            buildingNumber: 0, // No house number available
+            lat: lat,
+            lng: lng,
             status: 'not-visited' as const,
             phone: '',
             email: '',
@@ -295,6 +461,7 @@ function TerritoryEditContent() {
             updatedAt: new Date(),
           }
           detectedResidents.push(resident)
+          buildingCount++
         }
       }
     }
@@ -346,17 +513,25 @@ function TerritoryEditContent() {
     }
   }
 
-  const handleUpdateTerritory = (updateData: any) => {
+    const handleUpdateTerritory = (updateData: any) => {
     console.log('handleUpdateTerritory called with:', updateData)
     console.log('Pending boundary:', pendingBoundary)
     console.log('Detected buildings:', detectedBuildings)
-    
+    console.log('Current territory:', territory)
+
+    // Check if this is only a name/description change (no assignment changes)
+    const isOnlyNameDescriptionChange = !updateData.assignedAgentId &&
+                                      !updateData.teamId &&
+                                      !updateData.effectiveFrom &&
+                                      !updateData.removeAssignment &&
+                                      (updateData.name || updateData.description) &&
+                                      !pendingBoundary
+
     if (pendingBoundary) {
-      console.log('Processing update with pending boundary and building data')
+      console.log('Processing boundary update with new specific API')
       
-      // Combine the territory update data with the new boundary and building data
-      const fullUpdateData = {
-        ...updateData,
+      // Use the specific boundary update API
+      const boundaryUpdateData = {
         boundary: pendingBoundary,
         buildingData: {
           totalBuildings: detectedBuildings.length,
@@ -365,18 +540,62 @@ function TerritoryEditContent() {
           coordinates: detectedBuildings.map(building => [building.lng, building.lat])
         }
       }
+
+      console.log('Sending boundary update with data:', boundaryUpdateData)
       
-      console.log('Sending update with data:', fullUpdateData)
-      updateMutation.mutate({ id: territoryId, data: fullUpdateData })
-      
+             // Use unified API to update both boundary and residents synchronously
+       const unifiedUpdateData = {
+         updateType: 'all' as const,
+         boundary: pendingBoundary,
+         buildingData: {
+           totalBuildings: detectedBuildings.length,
+           residentialHomes: detectedBuildings.length,
+           addresses: detectedBuildings.map(building => building.address),
+           coordinates: detectedBuildings.map(building => [building.lng, building.lat])
+         },
+         residents: detectedBuildings.map(building => ({
+           name: building.name,
+           address: building.address,
+           lat: building.lat,
+           lng: building.lng,
+           status: building.status,
+           phone: building.phone || '',
+           email: building.email || '',
+           notes: building.notes || ''
+         }))
+       }
+
+       console.log('Sending unified update with data:', unifiedUpdateData)
+       updateBoundaryMutation.mutate({ id: territoryId, data: unifiedUpdateData })
+
       // Reset states after update
       setPendingBoundary(null)
       setDetectedBuildings([])
       setIsEditingBoundary(false) // Exit drawing mode after successful update
+    } else if (isOnlyNameDescriptionChange) {
+      console.log('Processing name/description update with new specific API')
+      
+      // Use the specific basic update API
+      const basicUpdateData = {
+        name: updateData.name,
+        description: updateData.description
+      }
+      
+      console.log('Sending basic update with data:', basicUpdateData)
+      updateBasicMutation.mutate({ id: territoryId, data: basicUpdateData })
     } else {
-      console.log('Processing regular update without boundary change')
-      // Regular update without boundary change
-      updateMutation.mutate({ id: territoryId, data: updateData })
+      console.log('Processing assignment update with legacy API')
+      // For assignment changes, use the legacy API since it handles assignment logic
+      const regularUpdateData = {
+        ...updateData,
+        // Only preserve assignment if not explicitly changing it
+        ...(territory?.currentAssignment?.agentId?._id && !updateData.assignedAgentId && { assignedAgentId: territory.currentAssignment.agentId._id }),
+        ...(territory?.currentAssignment?.teamId?._id && !updateData.teamId && { teamId: territory.currentAssignment.teamId._id }),
+        // Preserve status only if not explicitly changing assignment
+        ...((!updateData.assignedAgentId && !updateData.teamId && !updateData.effectiveFrom) && { status: territory?.status || 'DRAFT' })
+      }
+      console.log('Sending assignment update with data:', regularUpdateData)
+      updateMutation.mutate({ id: territoryId, data: regularUpdateData })
     }
   }
 
@@ -396,7 +615,7 @@ function TerritoryEditContent() {
 
   if (territoryLoading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading territory...</p>
@@ -407,7 +626,7 @@ function TerritoryEditContent() {
 
   if (!territory) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-600">Territory not found</p>
           <Button onClick={() => router.push('/territory-map')} className="mt-4">
@@ -419,9 +638,16 @@ function TerritoryEditContent() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <>
+      <style jsx global>{`
+        html, body {
+          overflow: hidden !important;
+          height: 100vh !important;
+        }
+      `}</style>
+      <div className="h-screen bg-gray-50 flex flex-col overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-4 bg-white border-b">
+      <div className="px-6 py-4 bg-white border-b flex-shrink-0">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">
@@ -446,7 +672,7 @@ function TerritoryEditContent() {
       </div>
 
       {/* Main Content */}
-      <div className="flex h-[calc(100vh-120px)] overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
                  {/* Map Section */}
          <div className="flex-1">
            <TerritoryEditMap 
@@ -467,7 +693,7 @@ function TerritoryEditContent() {
             agents={agents}
             teams={teams}
             onUpdate={handleUpdate}
-            isUpdating={updateMutation.isPending}
+            isUpdating={updateMutation.isPending || updateBasicMutation.isPending || updateBoundaryMutation.isPending || updateResidentsMutation.isPending}
             showExistingTerritories={showExistingTerritories}
             onToggleExistingTerritories={setShowExistingTerritories}
             existingTerritoriesCount={existingTerritoriesCount}
@@ -482,13 +708,14 @@ function TerritoryEditContent() {
           />
       </div>
     </div>
+    </>
   )
 }
 
 export default function TerritoryEditPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">Loading...</p>

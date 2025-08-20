@@ -103,7 +103,7 @@ export function TerritoryEditSidebar({
   const [availableAgents, setAvailableAgents] = useState<Agent[]>([])
   const [availableTeams, setAvailableTeams] = useState<Team[]>([])
 
-  // Function to check if there are any changes (name, description, or boundary)
+  // Function to check if there are any changes (name, description, boundary, or assignment)
   const hasChanges = () => {
     // Check for boundary changes
     if (hasBoundaryChanges) {
@@ -130,6 +130,14 @@ export function TerritoryEditSidebar({
     }
     if (assignmentType === 'team' && selectedTeam && currentAssignment?.teamId?._id !== selectedTeam) {
       return true
+    }
+
+    // Check for assignment date changes
+    if (assignedDate) {
+      const currentDate = currentAssignment?.effectiveFrom ? new Date(currentAssignment.effectiveFrom).toISOString().split('T')[0] : ''
+      if (assignedDate !== currentDate) {
+        return true
+      }
     }
 
     return false
@@ -199,11 +207,13 @@ export function TerritoryEditSidebar({
   }
 
   const handleEditTerritoryClick = () => {
+    console.log('handleEditTerritoryClick called, current state:', { isEditTerritoryOpen, isEditFormOpen })
     setIsEditTerritoryOpen(!isEditTerritoryOpen)
     // Close assignment form if open
     if (isEditFormOpen) {
       setIsEditFormOpen(false)
     }
+    console.log('After state change:', { isEditTerritoryOpen: !isEditTerritoryOpen, isEditFormOpen: false })
   }
 
   const handleReassignClick = () => {
@@ -271,8 +281,8 @@ export function TerritoryEditSidebar({
 
   if (!territory) {
     return (
-      <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto shadow-lg">
-        <div className="p-6">
+      <div className="w-96 bg-white border-l border-gray-200 shadow-lg flex flex-col h-full">
+        <div className="p-6 flex-1 flex items-center justify-center">
           <div className="text-center text-gray-500">
             Loading territory...
           </div>
@@ -281,132 +291,149 @@ export function TerritoryEditSidebar({
     )
   }
 
-  return (
-    <div className="w-96 bg-white border-l border-gray-200 overflow-y-auto shadow-lg">
-      <div className="p-6">
-        {/* Territory Information */}
-        <div className="mb-6">
-          <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
-            <h3 className="text-sm font-semibold text-blue-900 mb-2">
-              Territory: {territory.name}
-            </h3>
-            <div className="flex items-center gap-2 mb-3">
-              <Badge 
-                variant={
-                  territory.status === 'ACTIVE' ? 'default' :
-                  territory.status === 'SCHEDULED' ? 'secondary' :
-                  territory.status === 'COMPLETED' ? 'default' : 'outline'
-                }
-                className={
-                  territory.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
-                  territory.status === 'SCHEDULED' ? 'bg-yellow-100 text-yellow-800' :
-                  territory.status === 'COMPLETED' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
-                }
-              >
-                {territory.status}
-              </Badge>
-            </div>
-            
-            {territory.description && (
-              <p className="text-sm text-blue-700 mb-3">{territory.description}</p>
-            )}
-            
-            {/* Current Assignment Details */}
-            {territory.currentAssignment && (
-              <div className="text-sm text-blue-800 space-y-1">
-                <p>
-                  <strong>Assignment:</strong> {
-                    territory.currentAssignment.agentId 
-                      ? `${territory.currentAssignment.agentId.name} (${territory.currentAssignment.agentId.email})`
-                      : territory.currentAssignment.teamId 
-                        ? `Team: ${territory.currentAssignment.teamId.name}`
-                        : 'None'
-                  }
-                </p>
-                <p>
-                  <strong>Effective From:</strong> {new Date(territory.currentAssignment.effectiveFrom).toLocaleDateString()}
-                </p>
-              </div>
-            )}
-            
-            {/* Territory Context */}
-            <div className="text-xs text-blue-600 mt-2 pt-2 border-t border-blue-200">
-              <p>💡 <strong>Tip:</strong> Other territories are shown in orange on the map</p>
-            </div>
-          </div>
-          
-          {/* Existing Territories Toggle */}
-          {existingTerritoriesCount > 0 && (
-            <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    id="showExistingTerritories"
-                    checked={showExistingTerritories}
-                    onChange={(e) => onToggleExistingTerritories(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
-                    disabled={isUpdating}
-                  />
-                  <label htmlFor="showExistingTerritories" className="text-sm font-medium text-gray-700">
-                    Show Other Territories
-                  </label>
-                </div>
-                <div className="flex items-center space-x-1">
-                  {showExistingTerritories ? (
-                    <Eye className="w-4 h-4 text-gray-500" />
-                  ) : (
-                    <EyeOff className="w-4 h-4 text-gray-500" />
+     return (
+     <div className="w-96 bg-white border-l border-gray-200 shadow-lg flex flex-col h-full">
+               <div className="p-6 flex-1 flex flex-col overflow-hidden">
+                   {/* Territory Information - Hidden when forms are open */}
+          {!isEditTerritoryOpen && !isEditFormOpen && (
+            <div className="flex-1 overflow-y-auto">
+              <div className="mb-6">
+                <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                  <h3 className="text-sm font-semibold text-blue-900 mb-2">
+                    Territory: {territory.name}
+                  </h3>
+                  <div className="flex items-center gap-2 mb-3">
+                    <Badge 
+                      variant={
+                        territory.status === 'ACTIVE' ? 'default' :
+                        territory.status === 'SCHEDULED' ? 'secondary' :
+                        territory.status === 'COMPLETED' ? 'default' : 'outline'
+                      }
+                      className={
+                        territory.status === 'ACTIVE' ? 'bg-green-100 text-green-800' :
+                        territory.status === 'SCHEDULED' ? 'bg-yellow-100 text-yellow-800' :
+                        territory.status === 'COMPLETED' ? 'bg-purple-100 text-purple-800' : 'bg-gray-100 text-gray-800'
+                      }
+                    >
+                      {territory.status}
+                    </Badge>
+                  </div>
+                  
+                  {territory.description && (
+                    <p className="text-sm text-blue-700 mb-3">{territory.description}</p>
                   )}
+                  
+                  {/* Current Assignment Details */}
+                  {territory.currentAssignment && (
+                    <div className="text-sm text-blue-800 space-y-1">
+                      <p>
+                        <strong>Assignment:</strong> {
+                          territory.currentAssignment.agentId 
+                            ? `${territory.currentAssignment.agentId.name} (${territory.currentAssignment.agentId.email})`
+                            : territory.currentAssignment.teamId 
+                              ? `Team: ${territory.currentAssignment.teamId.name}`
+                              : 'None'
+                        }
+                      </p>
+                      <p>
+                        <strong>Effective From:</strong> {new Date(territory.currentAssignment.effectiveFrom).toLocaleDateString()}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Territory Context */}
+                  <div className="text-xs text-blue-600 mt-2 pt-2 border-t border-blue-200">
+                    <p>💡 <strong>Tip:</strong> Other territories are shown in orange on the map</p>
+                  </div>
                 </div>
-              </div>
-              <p className="text-xs text-gray-500 mt-1">
-                {existingTerritoriesCount} other territories available
-              </p>
-            </div>
-          )}
-          
-          {/* Focus Territory Button */}
-          <Button
-            onClick={onFocusTerritory}
-            variant="outline"
-            className="w-full mt-4 border-blue-500 text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-2"
-            disabled={isUpdating}
-          >
-            <MapPin className="h-4 w-4" />
-            Focus on Territory
-          </Button>
-        </div>
-        
-        {/* Edit Territory Button */}
-        <Button 
-          onClick={handleEditTerritoryClick}
-          className="w-full mt-4 bg-yellow-400 hover:bg-yellow-500 text-black flex items-center justify-center gap-2"
-          disabled={isUpdating}
-        >
-          <Edit className="h-4 w-4" />
-          {isEditTerritoryOpen ? 'Cancel Edit Territory' : 'Edit Territory'}
-        </Button>
+                
+                {/* Existing Territories Toggle */}
+                {existingTerritoriesCount > 0 && (
+                  <div className="mt-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="showExistingTerritories"
+                          checked={showExistingTerritories}
+                          onChange={(e) => onToggleExistingTerritories(e.target.checked)}
+                          className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                          disabled={isUpdating}
+                        />
+                        <label htmlFor="showExistingTerritories" className="text-sm font-medium text-gray-700">
+                          Show Other Territories
+                        </label>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        {showExistingTerritories ? (
+                          <Eye className="w-4 h-4 text-gray-500" />
+                        ) : (
+                          <EyeOff className="w-4 h-4 text-gray-500" />
+                        )}
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {existingTerritoriesCount} other territories available
+                    </p>
+                  </div>
+                )}
+                
+                                 {/* Focus Territory Button */}
+                 <Button
+                   onClick={onFocusTerritory}
+                   variant="outline"
+                   className="w-full mt-4 border-blue-500 text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-2"
+                   disabled={isUpdating}
+                 >
+                   <MapPin className="h-4 w-4" />
+                   Focus on Territory
+                 </Button>
 
-        {/* Reassign Button */}
-        <Button 
-          onClick={handleReassignClick}
-          className="w-full mt-2 bg-green-600 hover:bg-green-700 text-white flex items-center justify-center gap-2"
-          disabled={isUpdating}
-        >
-          <Edit className="h-4 w-4" />
-          {isEditFormOpen ? 'Cancel Edit' : 'Want to Reassign'}
-        </Button>
+                 {/* Action Buttons */}
+                 <div className="mt-4">
+                   <Button 
+                     onClick={handleEditTerritoryClick}
+                     className="w-full bg-yellow-400 hover:bg-yellow-500 text-black flex items-center justify-center gap-2"
+                     disabled={isUpdating}
+                   >
+                     <Edit className="h-4 w-4" />
+                     Edit Territory
+                   </Button>
 
-        {/* Edit Territory Form */}
-        {isEditTerritoryOpen && (
-          <div className="border-t border-gray-200 pt-6">
-            <div className="max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
-              <div className="space-y-6 pr-2">
-                <div className="space-y-4">
-                  <h2 className="text-lg font-semibold text-gray-900">
-                    Edit Territory Details
-                  </h2>
+                   <Button 
+                     onClick={handleReassignClick}
+                     className="w-full mt-2 bg-green-600 hover:bg-green-700 text-white flex items-center justify-center gap-2"
+                     disabled={isUpdating}
+                   >
+                     <Edit className="h-4 w-4" />
+                     Want to Reassign
+                   </Button>
+                 </div>
+               </div>
+             </div>
+           )}
+
+
+
+                                   {/* Edit Territory Form */}
+          {isEditTerritoryOpen && (
+            <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+                               <div className="space-y-6 pr-2 pb-32">
+                 <div className="space-y-4">
+                   <div className="flex items-center justify-between">
+                     <h2 className="text-lg font-semibold text-gray-900">
+                       Edit Territory Details
+                     </h2>
+                     <button
+                       type="button"
+                       onClick={() => setIsEditTerritoryOpen(false)}
+                       className="p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100"
+                       title="Hide form"
+                     >
+                       <EyeOff className="h-4 w-4" />
+                     </button>
+                   </div>
                   
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
                     <div className="text-sm font-medium text-blue-800">
@@ -516,100 +543,142 @@ export function TerritoryEditSidebar({
                         <div className="text-sm font-medium text-green-800 mb-2">
                           Buildings detected in new boundary
                         </div>
-                                                 <div className="space-y-1 max-h-32 overflow-y-auto">
-                           {detectedBuildings.slice(0, 5).map((building, index) => (
-                             <div key={index} className="text-xs text-green-700 flex justify-between">
-                               <span>
-                                 {building.buildingNumber && (
-                                   <span className="font-medium text-green-800">#{building.buildingNumber}</span>
-                                 )} {building.address || `Building ${index + 1}`}
-                               </span>
-                               <span className="text-green-600">✓</span>
-                             </div>
-                           ))}
-                           {detectedBuildings.length > 5 && (
-                             <div className="text-xs text-green-600">
-                               +{detectedBuildings.length - 5} more buildings
-                             </div>
-                           )}
-                         </div>
+                        <div className="space-y-1 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
+                          {detectedBuildings.map((building, index) => (
+                            <div key={index} className="text-xs text-green-700 flex justify-between items-start py-1">
+                              <span className="flex-1 pr-2">
+                                {building.buildingNumber && (
+                                  <span className="font-medium text-green-800">#{building.buildingNumber}</span>
+                                )} {building.address || `Building ${index + 1}`}
+                              </span>
+                              <span className="text-green-600 flex-shrink-0">✓</span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   )}
 
-                 {/* Edit Boundary Button */}
-                 <div className="space-y-3">
-                   <Label className="text-sm font-medium text-gray-700">
-                     Boundary Management
-                   </Label>
-                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                     <div className="text-sm font-medium text-blue-800 mb-2">
-                       Edit Territory Boundary
-                     </div>
-                     <div className="text-xs text-blue-600 mb-3">
-                       Click to enable drawing mode on the map. Draw a new polygon to update the boundary and automatically detect residents.
-                     </div>
-                     <Button
-                       type="button"
-                       onClick={handleEditBoundary}
-                       className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium h-10"
-                       disabled={isUpdating}
-                     >
-                       Edit Boundary on Map
-                     </Button>
-                   </div>
-                 </div>
+                                   {/* Edit Boundary Button */}
+                  <div className="space-y-3">
+                    <Label className="text-sm font-medium text-gray-700">
+                      Boundary Management
+                    </Label>
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      <div className="text-sm font-medium text-blue-800 mb-2">
+                        Edit Territory Boundary
+                      </div>
+                      <div className="text-xs text-blue-600 mb-3">
+                        Click to enable drawing mode on the map. Draw a new polygon to update the boundary and automatically detect residents.
+                      </div>
+                      <Button
+                        type="button"
+                        onClick={handleEditBoundary}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium h-10"
+                        disabled={isUpdating}
+                      >
+                        Edit Boundary on Map
+                      </Button>
+                    </div>
+                  </div>
 
-                                 {/* Action Buttons */}
-                 <div className="flex gap-3 pt-4">
-                   <Button
-                     type="button"
-                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium h-12"
-                     onClick={handleUpdateTerritory}
-                     disabled={isDetectingBuildings || isUpdating || !hasChanges()}
-                   >
-                     {isUpdating ? 'Updating...' : 'Update Territory'}
-                   </Button>
-                   <Button
-                     type="button"
-                     variant="outline"
-                     className="flex-1 h-12"
-                     onClick={() => setIsEditTerritoryOpen(false)}
-                     disabled={isDetectingBuildings || isUpdating}
-                   >
-                     Cancel
-                   </Button>
-                 </div>
-                 {!hasChanges() && (
-                   <p className="text-xs text-gray-500 mt-2 text-center">
-                     No changes detected. Make changes to name, description, or boundary to enable update.
-                   </p>
-                 )}
+                  {/* Action Buttons */}
+                  <div className="flex gap-3 pt-4">
+                    <Button
+                      type="button"
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium h-12"
+                      onClick={handleUpdateTerritory}
+                      disabled={isDetectingBuildings || isUpdating || !hasChanges()}
+                    >
+                      {isUpdating ? 'Updating...' : 'Update Territory'}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="flex-1 h-12"
+                      onClick={() => setIsEditTerritoryOpen(false)}
+                      disabled={isDetectingBuildings || isUpdating}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                  {!hasChanges() && (
+                    <p className="text-xs text-gray-500 mt-2 text-center">
+                      No changes detected. Make changes to name, description, or boundary to enable update.
+                    </p>
+                  )}
               </div>
             </div>
           </div>
         )}
 
-        {/* Edit Form */}
-        {isEditFormOpen && (
-          <div className="border-t border-gray-200 pt-6">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {/* Header */}
-              <div className="space-y-4">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Territory Assignment
-                </h2>
-                
-                {/* Success Message */}
-                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-                  <div className="text-sm font-medium text-green-800">
-                    Territory Saved as {territory?.status || 'Draft'}
+                                                                       {/* Edit Form */}
+           {isEditFormOpen && (
+             <div className="flex-1 flex flex-col min-h-0">
+               <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0">
+                 <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400" style={{ minHeight: '600px' }}>
+                  <div className="space-y-6 pr-2 pb-32">
+                               {/* Header */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-lg font-semibold text-gray-900">
+                      Territory Assignment
+                    </h2>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditFormOpen(false)}
+                      className="p-1 text-gray-500 hover:text-gray-700 rounded-full hover:bg-gray-100"
+                      title="Hide form"
+                    >
+                      <EyeOff className="h-4 w-4" />
+                    </button>
                   </div>
-                  <div className="text-xs text-green-600 mt-1">
-                    You can assign it now or leave it for later assignment
-                  </div>
-                </div>
-              </div>
+                 
+                 {/* Success Message */}
+                 <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                   <div className="text-sm font-medium text-green-800">
+                     Territory Saved as {territory?.status || 'Draft'}
+                   </div>
+                   <div className="text-xs text-green-600 mt-1">
+                     You can assign it now or leave it for later assignment
+                   </div>
+                 </div>
+               </div>
+
+               {/* Territory Details - Moved to top */}
+               <div className="space-y-3">
+                 <Label className="text-sm font-medium text-gray-700">
+                   Territory Details
+                 </Label>
+                 <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Name:</span>
+                     <span className="font-medium text-gray-900">{territory?.name}</span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Status:</span>
+                     <span className={`font-medium ${
+                       territory?.status === 'ACTIVE' ? 'text-green-600' :
+                       territory?.status === 'SCHEDULED' ? 'text-yellow-600' :
+                       territory?.status === 'COMPLETED' ? 'text-purple-600' : 'text-orange-600'
+                     }`}>
+                       {territory?.status}
+                     </span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Residents:</span>
+                     <span className="font-medium text-blue-600">
+                       {territory?.totalResidents || territory?.buildingData?.totalBuildings || territory?.buildingData?.residentialHomes || 0}
+                     </span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span className="text-gray-600">Created:</span>
+                     <span className="font-medium text-gray-900">
+                       {territory?.createdAt ? new Date(territory.createdAt).toLocaleDateString() : 'N/A'}
+                     </span>
+                   </div>
+                 </div>
+               </div>
 
               {/* Assignment Type */}
               <div className="space-y-3">
@@ -664,7 +733,7 @@ export function TerritoryEditSidebar({
                       team.name.toLowerCase().includes(teamSearchText.toLowerCase())
                     )
                     return matchingTeams.length > 0 && (
-                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white">
+                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
                         {matchingTeams.map((team) => (
                           <div
                             key={team._id}
@@ -725,7 +794,7 @@ export function TerritoryEditSidebar({
                       agent.email.toLowerCase().includes(agentSearchText.toLowerCase())
                     )
                     return matchingAgents.length > 0 && (
-                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white">
+                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
                         {matchingAgents.map((agent) => (
                           <div
                             key={agent._id}
@@ -784,70 +853,62 @@ export function TerritoryEditSidebar({
                 </div>
               )}
 
-              {/* Action Buttons */}
-              <div className="flex gap-3 pt-4">
-                <Button
-                  type="submit"
-                  className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-medium h-12"
-                  disabled={isUpdating || !territoryName.trim() || !hasChanges()}
-                >
-                  {isUpdating ? 'Updating...' : 'Update Assignment'}
-                </Button>
-                                 <Button
-                   type="button"
-                   variant="outline"
-                   className="flex-1 h-12"
-                   onClick={() => setIsEditFormOpen(false)}
-                   disabled={isUpdating}
+                             {/* Action Buttons */}
+               <div className="flex gap-3 pt-4">
+                 <Button
+                   type="submit"
+                   className="flex-1 bg-yellow-400 hover:bg-yellow-500 text-black font-medium h-12"
+                   disabled={isUpdating || !territoryName.trim() || !hasChanges()}
                  >
-                   Skip for Now
+                   {isUpdating ? 'Updating...' : 'Update Assignment'}
                  </Button>
-              </div>
-              {!hasChanges() && (
-                <p className="text-xs text-gray-500 mt-2 text-center">
-                  No changes detected. Make changes to name, description, boundary, or assignment to enable update.
-                </p>
-              )}
-            </form>
+                                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1 h-12"
+                    onClick={() => setIsEditFormOpen(false)}
+                    disabled={isUpdating}
+                  >
+                    Skip for Now
+                  </Button>
+               </div>
+                               {!hasChanges() && (
+                  <p className="text-xs text-gray-500 mt-2 text-center">
+                    No changes detected. Make changes to name, description, boundary, or assignment to enable update.
+                  </p>
+                )}
 
-            {/* Territory Details */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Territory Details
-              </h3>
-              
-              <div className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Name:</span>
-                  <span className="font-medium text-gray-900">{territory?.name}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Status:</span>
-                  <span className={`font-medium ${
-                    territory?.status === 'ACTIVE' ? 'text-green-600' :
-                    territory?.status === 'SCHEDULED' ? 'text-yellow-600' :
-                    territory?.status === 'COMPLETED' ? 'text-purple-600' : 'text-orange-600'
-                  }`}>
-                    {territory?.status}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Residents:</span>
-                  <span className="font-medium text-blue-600">
-                    {territory?.totalResidents || territory?.buildingData?.totalBuildings || territory?.buildingData?.residentialHomes || 0}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Created:</span>
-                  <span className="font-medium text-gray-900">
-                    {territory?.createdAt ? new Date(territory.createdAt).toLocaleDateString() : 'N/A'}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+                                                  {/* Extra spacing to ensure scrollbar appears */}
+                 <div className="h-8"></div>
+               </div>
+             </div>
+           </form>
+         </div>
+       )}
+
+                   
+       </div>
+                       <style jsx global>{`
+          .overflow-y-auto::-webkit-scrollbar {
+            width: 6px !important;
+          }
+          .overflow-y-auto::-webkit-scrollbar-track {
+            background: #F3F4F6 !important;
+            border-radius: 3px !important;
+          }
+          .overflow-y-auto::-webkit-scrollbar-thumb {
+            background: #9CA3AF !important;
+            border-radius: 3px !important;
+          }
+          .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+            background: #6B7280 !important;
+          }
+          
+          /* Force scrollbar to show */
+          .overflow-y-auto {
+            overflow-y: scroll !important;
+          }
+        `}</style>
     </div>
   )
 }
