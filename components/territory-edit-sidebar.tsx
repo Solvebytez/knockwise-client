@@ -346,6 +346,7 @@ export function TerritoryEditSidebar({
                     checked={showExistingTerritories}
                     onChange={(e) => onToggleExistingTerritories(e.target.checked)}
                     className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+                    disabled={isUpdating}
                   />
                   <label htmlFor="showExistingTerritories" className="text-sm font-medium text-gray-700">
                     Show Other Territories
@@ -370,6 +371,7 @@ export function TerritoryEditSidebar({
             onClick={onFocusTerritory}
             variant="outline"
             className="w-full mt-4 border-blue-500 text-blue-600 hover:bg-blue-50 flex items-center justify-center gap-2"
+            disabled={isUpdating}
           >
             <MapPin className="h-4 w-4" />
             Focus on Territory
@@ -380,6 +382,7 @@ export function TerritoryEditSidebar({
         <Button 
           onClick={handleEditTerritoryClick}
           className="w-full mt-4 bg-yellow-400 hover:bg-yellow-500 text-black flex items-center justify-center gap-2"
+          disabled={isUpdating}
         >
           <Edit className="h-4 w-4" />
           {isEditTerritoryOpen ? 'Cancel Edit Territory' : 'Edit Territory'}
@@ -389,6 +392,7 @@ export function TerritoryEditSidebar({
         <Button 
           onClick={handleReassignClick}
           className="w-full mt-2 bg-green-600 hover:bg-green-700 text-white flex items-center justify-center gap-2"
+          disabled={isUpdating}
         >
           <Edit className="h-4 w-4" />
           {isEditFormOpen ? 'Cancel Edit' : 'Want to Reassign'}
@@ -426,6 +430,7 @@ export function TerritoryEditSidebar({
                     onChange={(e) => setTerritoryName(e.target.value)}
                     placeholder="Enter territory name..."
                     className="h-12 text-base"
+                    disabled={isUpdating}
                   />
                 </div>
 
@@ -440,6 +445,7 @@ export function TerritoryEditSidebar({
                     onChange={(e) => setTerritoryDescription(e.target.value)}
                     placeholder="Enter territory description..."
                     className="min-h-24 resize-none"
+                    disabled={isUpdating}
                   />
                 </div>
 
@@ -547,6 +553,7 @@ export function TerritoryEditSidebar({
                        type="button"
                        onClick={handleEditBoundary}
                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium h-10"
+                       disabled={isUpdating}
                      >
                        Edit Boundary on Map
                      </Button>
@@ -609,7 +616,7 @@ export function TerritoryEditSidebar({
                 <Label className="text-sm font-medium text-gray-700">
                   Assignment Type
                 </Label>
-                <RadioGroup value={assignmentType} onValueChange={handleAssignmentTypeChange}>
+                <RadioGroup value={assignmentType} onValueChange={handleAssignmentTypeChange} disabled={isUpdating}>
                   <div className="space-y-3">
                     <div className="flex items-center space-x-2">
                       <RadioGroupItem value="none" id="none-edit" className="border-2" />
@@ -649,6 +656,7 @@ export function TerritoryEditSidebar({
                     onChange={(e) => setTeamSearchText(e.target.value)}
                     placeholder="Search for team name..."
                     className="h-12 text-base"
+                    disabled={isUpdating}
                   />
                   {/* Show matching teams */}
                   {teamSearchText && !selectedTeam && (() => {
@@ -708,6 +716,7 @@ export function TerritoryEditSidebar({
                     onChange={(e) => setAgentSearchText(e.target.value)}
                     placeholder="Search for agent name or email..."
                     className="h-12 text-base"
+                    disabled={isUpdating}
                   />
                   {/* Show matching agents */}
                   {agentSearchText && !assignedRep && (() => {
@@ -770,6 +779,7 @@ export function TerritoryEditSidebar({
                     onChange={(e) => setAssignedDate(e.target.value)}
                     className="h-12 text-base"
                     placeholder="dd-mm-yyyy"
+                    disabled={isUpdating}
                   />
                 </div>
               )}
@@ -783,14 +793,15 @@ export function TerritoryEditSidebar({
                 >
                   {isUpdating ? 'Updating...' : 'Update Assignment'}
                 </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="flex-1 h-12"
-                  onClick={() => setIsEditFormOpen(false)}
-                >
-                  Skip for Now
-                </Button>
+                                 <Button
+                   type="button"
+                   variant="outline"
+                   className="flex-1 h-12"
+                   onClick={() => setIsEditFormOpen(false)}
+                   disabled={isUpdating}
+                 >
+                   Skip for Now
+                 </Button>
               </div>
               {!hasChanges() && (
                 <p className="text-xs text-gray-500 mt-2 text-center">

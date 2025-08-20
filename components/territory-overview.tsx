@@ -977,7 +977,7 @@ export const TerritoryOverview = forwardRef<{ refetch: () => void }, {}>((props,
           <Edit className="mr-2 h-4 w-4" />
           Edit Territory
         </DropdownMenuItem>
-                          <DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => router.push(`/territory-map-view/${territory._id}`)}>
                             <Map className="mr-2 h-4 w-4" />
                             View on Map
                           </DropdownMenuItem>

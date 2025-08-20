@@ -21,6 +21,7 @@ import {
   X
 } from "lucide-react"
 import { apiInstance } from "@/lib/apiInstance"
+import { toast } from "sonner"
 
 const libraries: ("drawing" | "geometry" | "places")[] = ["drawing", "geometry", "places"]
 
@@ -76,6 +77,7 @@ export function TerritoryEditMap({
   const [isMapInitiallyLoaded, setIsMapInitiallyLoaded] = useState(false)
 
   const { isLoaded, loadError } = useJsApiLoader({
+    id: "google-map-script",
     googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
     libraries,
   })
@@ -238,13 +240,150 @@ export function TerritoryEditMap({
     }
   }, [territory])
 
+  // Check if drawn polygon overlaps with existing territories
+  const checkTerritoryOverlap = useCallback((newPolygon: any) => {
+    if (!window.google || !window.google.maps.geometry) {
+      console.warn('Google Maps Geometry library not loaded')
+      return false
+    }
+
+    return existingTerritories.some(existingTerritory => {
+      // Skip the current territory being edited
+      if (existingTerritory._id === territory?._id) return false
+      
+      // Skip territories without boundaries
+      if (!existingTerritory.boundary?.coordinates) return false
+      
+      try {
+        // Create Google Maps polygon for existing territory
+        const existingPolygon = new window.google.maps.Polygon({
+          paths: existingTerritory.boundary.coordinates[0].map((coord: number[]) => ({
+            lat: coord[1],
+            lng: coord[0]
+          }))
+        })
+
+        // Check if any point from new polygon is inside existing polygon
+        const newPolygonPath = newPolygon.getPath()
+        for (let i = 0; i < newPolygonPath.getLength(); i++) {
+          const point = newPolygonPath.getAt(i)
+          if (window.google.maps.geometry.poly.containsLocation(point, existingPolygon)) {
+            return true
+          }
+        }
+
+        // Check if any point from existing polygon is inside new polygon
+        const existingPolygonPath = existingPolygon.getPath()
+        for (let i = 0; i < existingPolygonPath.getLength(); i++) {
+          const point = existingPolygonPath.getAt(i)
+          if (window.google.maps.geometry.poly.containsLocation(point, newPolygon)) {
+            return true
+          }
+        }
+
+        return false
+      } catch (error) {
+        console.error('Error checking polygon intersection:', error)
+        return false
+      }
+    })
+  }, [existingTerritories, territory?._id])
+
+  // Check overlap with backend
+  const checkBackendOverlap = useCallback(async (polygon: any) => {
+    try {
+      const polygonCoords = polygon.getPath().getArray().map((latLng: any) => [latLng.lng(), latLng.lat()])
+      
+      // Ensure polygon is closed
+      if (polygonCoords.length > 0) {
+        const firstCoord = polygonCoords[0]
+        const lastCoord = polygonCoords[polygonCoords.length - 1]
+        if (firstCoord[0] !== lastCoord[0] || firstCoord[1] !== lastCoord[1]) {
+          polygonCoords.push([...firstCoord])
+        }
+      }
+
+      const response = await apiInstance.post('/zones/check-overlap', {
+        boundary: {
+          type: 'Polygon',
+          coordinates: [polygonCoords]
+        },
+        excludeZoneId: territory?._id // Exclude current territory from overlap check
+      })
+
+      if (response.data.success) {
+        return response.data.data
+      } else {
+        throw new Error(response.data.message || 'Failed to check overlap')
+      }
+    } catch (error) {
+      console.error('Error checking backend overlap:', error)
+      // Fallback to frontend validation
+      return null
+    }
+  }, [territory?._id])
+
+  // Validate territory before proceeding
+  const validateTerritory = useCallback(async (polygon: any) => {
+    const errors: string[] = []
+    const warnings: string[] = []
+
+    // First try backend validation
+    const backendValidation = await checkBackendOverlap(polygon)
+    
+    if (backendValidation) {
+      if (backendValidation.hasOverlap) {
+        const zoneNames = backendValidation.overlappingZones.map((zone: any) => zone.name).join(', ')
+        errors.push(`This area overlaps with existing territory(ies): ${zoneNames}`)
+      }
+      
+      return { 
+        errors, 
+        warnings, 
+        backendValidation 
+      }
+    }
+
+    // Fallback to frontend validation
+    if (checkTerritoryOverlap(polygon)) {
+      errors.push("This area overlaps with an existing territory")
+    }
+
+    return { errors, warnings }
+  }, [checkTerritoryOverlap, checkBackendOverlap])
+
   // Handle polygon completion
-  const onPolygonComplete = useCallback((polygon: any) => {
+  const onPolygonComplete = useCallback(async (polygon: any) => {
     if (currentPolygon) {
       currentPolygon.setMap(null)
     }
     
     setCurrentPolygon(polygon)
+    
+    // Validate territory before proceeding
+    const validation = await validateTerritory(polygon)
+    
+    if (validation.errors.length > 0) {
+      // Show error and remove polygon
+      console.error('Territory overlap detected:', validation.errors.join(", "))
+      polygon.setMap(null)
+      setCurrentPolygon(null)
+      
+      // Reset cursor to default
+      if (mapRef) {
+        mapRef.setOptions({ draggableCursor: 'grab' })
+      }
+      
+      // Show error message using toast
+      toast.error(validation.errors.join(", "))
+      return
+    }
+
+    // Show warnings if any
+    if (validation.warnings.length > 0) {
+      console.warn('Territory warnings:', validation.warnings.join(", "))
+      toast.warning(validation.warnings.join(", "))
+    }
     
     // Convert polygon to GeoJSON format
     const path = polygon.getPath()
@@ -266,12 +405,15 @@ export function TerritoryEditMap({
       mapRef.setOptions({ draggableCursor: 'grab' })
     }
     
+    // Show success message
+    toast.success('New boundary drawn successfully! No overlaps detected.')
+    
     // Immediately trigger building detection like the working TerritoryMap component
     console.log('Polygon drawn successfully, triggering building detection...')
     if (onBoundaryUpdate) {
       onBoundaryUpdate(newBoundary)
     }
-  }, [currentPolygon, mapRef, onBoundaryUpdate])
+  }, [currentPolygon, mapRef, onBoundaryUpdate, validateTerritory])
 
   const onUnmount = useCallback(() => {
     setMapRef(null)
@@ -714,6 +856,18 @@ export function TerritoryEditMap({
                    >
                   <X className="h-4 w-4" />
                 </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Overlap Warning Indicator */}
+          {showExistingTerritories && existingTerritories.length > 0 && (
+            <div className="absolute top-16 left-1/2 transform -translate-x-1/2 z-20">
+              <div className="bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2">
+                <div className="w-2 h-2 bg-white rounded-full"></div>
+                <span className="font-medium text-sm">
+                  {existingTerritories.length} existing territories shown in orange - avoid overlaps when drawing
+                </span>
               </div>
             </div>
           )}

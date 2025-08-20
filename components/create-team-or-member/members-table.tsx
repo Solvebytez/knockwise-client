@@ -471,7 +471,7 @@ export function MembersTable() {
                         <div className="flex items-center text-sm">
                           <Building className="w-4 h-4 mr-2 text-blue-500" />
                           <span className="font-medium text-gray-900">
-                            {member.primaryTeamId?.name || 'Unassigned'}
+                            {member.primaryTeamId?.name || (member.teamInfo && member.teamInfo.length > 0 ? member.teamInfo[0].name : 'Unassigned')}
                           </span>
                         </div>
                         <div className="flex items-center text-sm">
