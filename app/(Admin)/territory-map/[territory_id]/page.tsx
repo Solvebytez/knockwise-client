@@ -32,11 +32,60 @@ interface Agent {
   _id: string
   name: string
   email: string
+  status: string
+  assignmentStatus?: string
+  teamMemberships?: Array<{
+    teamId: string
+    teamName: string
+    teamStatus: string
+    teamAssignmentStatus: string
+    isPrimary: boolean
+  }>
+  assignmentSummary?: {
+    totalActiveZones: number
+    totalScheduledZones: number
+    hasActiveAssignments: boolean
+    hasScheduledAssignments: boolean
+    individualZones: string[]
+    teamZones: string[]
+    scheduledZones: string[]
+    currentAssignmentStatus: string
+    assignmentDetails: {
+      hasIndividualAssignments: boolean
+      hasTeamAssignments: boolean
+      hasScheduledIndividualAssignments: boolean
+      hasScheduledTeamAssignments: boolean
+      totalAssignments: number
+      isFullyAssigned: boolean
+      isPartiallyAssigned: boolean
+      isOnlyScheduled: boolean
+    }
+  }
 }
 
 interface Team {
   _id: string
   name: string
+  description?: string
+  leaderId?: {
+    _id: string
+    name: string
+    email: string
+  }
+  agentIds?: Array<{
+    _id: string
+    name: string
+    email: string
+    status: string
+  }>
+  status?: string
+  performance?: {
+    totalMembers: number
+    activeMembers: number
+    averageKnocks: number
+    completionRate: number
+    zoneCoverage: number
+  }
 }
 
 // API functions
@@ -52,11 +101,13 @@ const fetchTerritory = async (id: string): Promise<Territory> => {
 }
 
 const fetchAgents = async (): Promise<Agent[]> => {
-  const response = await apiInstance.get('/users/my-created-agents')
+  // Enhanced search with team membership and assignment information
+  const response = await apiInstance.get('/users/my-created-agents?includeTeamInfo=true')
   return response.data.data
 }
 
 const fetchTeams = async (): Promise<Team[]> => {
+  // Enhanced teams with member count and assignment information
   const response = await apiInstance.get('/teams')
   return response.data.data
 }

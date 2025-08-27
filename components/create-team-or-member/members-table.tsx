@@ -59,6 +59,13 @@ interface Member {
   }>
   teamIds: string[]
   zoneIds: string[]
+  teamMemberships?: Array<{
+    teamId: string
+    teamName: string
+    teamStatus: string
+    teamAssignmentStatus: string
+    isPrimary: boolean
+  }>
   createdBy?: {
     _id: string
     name: string
@@ -84,7 +91,7 @@ interface DetailedMember extends Member {
 
 const fetchMembers = async (): Promise<Member[]> => {
   try {
-    const response = await apiInstance.get('/users/my-created-agents')
+    const response = await apiInstance.get('/users/my-created-agents?status=all&includeTeamInfo=true')
     console.log('API Response:', response.data)
     return response.data.data || []
   } catch (error) {
@@ -141,7 +148,17 @@ export function MembersTable() {
 
   const { data: members = [], isLoading, error } = useQuery({
     queryKey: ['members'],
-    queryFn: fetchMembers
+    queryFn: fetchMembers,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error: any) => {
+      // Don't retry on 429 errors
+      if (error?.response?.status === 429) {
+        return false;
+      }
+      return failureCount < 2;
+    }
   })
 
   // Fetch detailed member information
@@ -470,9 +487,29 @@ export function MembersTable() {
                       <div className="space-y-1">
                         <div className="flex items-center text-sm">
                           <Building className="w-4 h-4 mr-2 text-blue-500" />
-                          <span className="font-medium text-gray-900">
-                            {member.primaryTeamId?.name || (member.teamInfo && member.teamInfo.length > 0 ? member.teamInfo[0].name : 'Unassigned')}
-                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {member.teamMemberships && member.teamMemberships.length > 0 ? (
+                              member.teamMemberships.map((team, index) => (
+                                <span
+                                  key={team.teamId}
+                                  className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    team.isPrimary
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : 'bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {team.teamName}
+                                  {team.isPrimary && (
+                                    <span className="ml-1 text-blue-600">★</span>
+                                  )}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="font-medium text-gray-900">
+                                {member.primaryTeamId?.name || 'Unassigned'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center text-sm">
                           <MapPin className="w-4 h-4 mr-2 text-green-500" />
@@ -483,7 +520,7 @@ export function MembersTable() {
                                     {zone.name}{index < (member.allAssignedZones?.length || 0) - 1 ? ', ' : ''}
                                   </span>
                                 ))
-                              : member.primaryZoneId?.name || member.teamZoneInfo?.name || 'Unassigned'
+                              : 'Unassigned'
                             }
                           </span>
                         </div>

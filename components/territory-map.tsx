@@ -606,6 +606,18 @@ export function TerritoryMap() {
     }
   }, [])
 
+  // Enhanced search with team membership and assignment information
+  const fetchAgents = useCallback(async (): Promise<any[]> => {
+    const response = await apiInstance.get('/users/my-created-agents?includeTeamInfo=true')
+    return response.data.data || []
+  }, [])
+
+  // Enhanced teams with member count and assignment information
+  const fetchTeams = useCallback(async (): Promise<any[]> => {
+    const response = await apiInstance.get('/teams')
+    return response.data.data || []
+  }, [])
+
   const searchAssignment = useCallback(async (query: string, type: "team" | "individual") => {
     if (!query.trim()) {
       setAssignmentSearchResults([])
@@ -616,21 +628,22 @@ export function TerritoryMap() {
     setIsSearchingAssignment(true)
     try {
       if (type === "team") {
-        const response = await apiInstance.get(`/teams?search=${encodeURIComponent(query)}`)
-        console.log('Team search response:', response.data)
-        if (response.data.success) {
-          setAssignmentSearchResults(response.data.data || [])
-        } else {
-          setAssignmentSearchResults([])
-        }
+        // Fetch all teams and filter client-side for better performance
+        const allTeams = await fetchTeams()
+        const filteredTeams = allTeams.filter(team => 
+          team.name.toLowerCase().includes(query.toLowerCase())
+        )
+        console.log('Team search results:', filteredTeams)
+        setAssignmentSearchResults(filteredTeams)
       } else {
-        const response = await apiInstance.get(`/users/list-all?role=AGENT&search=${encodeURIComponent(query)}`)
-        console.log('User search response:', response.data)
-        if (response.data.success) {
-          setAssignmentSearchResults(response.data.data || [])
-        } else {
-          setAssignmentSearchResults([])
-        }
+        // Fetch all agents and filter client-side for better performance
+        const allAgents = await fetchAgents()
+        const filteredAgents = allAgents.filter(agent => 
+          agent.name.toLowerCase().includes(query.toLowerCase()) ||
+          agent.email.toLowerCase().includes(query.toLowerCase())
+        )
+        console.log('Agent search results:', filteredAgents)
+        setAssignmentSearchResults(filteredAgents)
       }
     } catch (error) {
       console.error('Error searching for assignment:', error)
@@ -646,7 +659,7 @@ export function TerritoryMap() {
     } finally {
       setIsSearchingAssignment(false)
     }
-  }, [])
+  }, [fetchAgents, fetchTeams])
 
   // Check if drawn polygon overlaps with existing territories
   const checkTerritoryOverlap = useCallback((newPolygon: any) => {
@@ -2025,7 +2038,7 @@ export function TerritoryMap() {
 
                   {/* Search Results */}
                   {assignmentSearchResults.length > 0 && (
-                    <div className="mt-2 max-h-40 overflow-y-auto border border-gray-200 rounded-md bg-white">
+                    <div className="mt-2 max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white">
                       {assignmentSearchResults.map((result) => (
                         <div
                           key={result._id || result.id}
@@ -2034,16 +2047,140 @@ export function TerritoryMap() {
                             setAssignmentSearchQuery(assignmentType === "team" ? result.name : `${result.name} (${result.email})`)
                             setAssignmentSearchResults([])
                           }}
-                          className="p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+                          className="p-3 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
                         >
-                          <div className="font-medium text-sm">
-                            {assignmentType === "team" ? result.name : result.name}
-                          </div>
-                          {assignmentType === "individual" && (
-                            <div className="text-xs text-gray-500">{result.email}</div>
-                          )}
-                          {assignmentType === "team" && result.agentIds && (
-                            <div className="text-xs text-gray-500">{result.agentIds.length} agents</div>
+                          {assignmentType === "team" ? (
+                            // Team Result Display
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{result.name}</p>
+                              <p className="text-sm text-gray-500">
+                                {result.agentIds?.length || 0} members
+                              </p>
+                              
+                              {/* Assignment Status Badge */}
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ${
+                                result.performance?.zoneCoverage > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {result.performance?.zoneCoverage > 0 ? '✓ Assigned' : '○ Unassigned'}
+                              </span>
+                              
+                              {/* Current Zone Coverage */}
+                              {result.performance?.zoneCoverage > 0 && (
+                                <div className="mt-1">
+                                  <p className="text-xs text-blue-600">
+                                    🗺️ Currently assigned to {result.performance.zoneCoverage} zone(s)
+                                  </p>
+                                </div>
+                              )}
+                              
+                              {/* Team Leader */}
+                              {result.leaderId && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                  👑 Leader: {result.leaderId.name}
+                                </p>
+                              )}
+                              
+                              {/* Team Status */}
+                              {result.status && (
+                                <p className="text-xs text-gray-600">
+                                  Status: {result.status}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            // Individual Agent Result Display
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-900">{result.name}</p>
+                                <p className="text-sm text-gray-500">{result.email}</p>
+                                
+                                {/* Assignment Status Badge */}
+                                {result.assignmentSummary && (
+                                  <div className="mt-1">
+                                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                      result.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                      {result.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                                    </span>
+                                    
+                                    {/* Detailed Assignment Status */}
+                                    {result.assignmentSummary.assignmentDetails && (
+                                      <div className="mt-1 space-y-1">
+                                        {result.assignmentSummary.assignmentDetails.isFullyAssigned && (
+                                          <p className="text-xs text-green-600 font-medium">
+                                            ✓ Fully assigned ({result.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                          </p>
+                                        )}
+                                        {result.assignmentSummary.assignmentDetails.isPartiallyAssigned && (
+                                          <p className="text-xs text-yellow-600 font-medium">
+                                            ⚠ Partially assigned ({result.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                          </p>
+                                        )}
+                                        {result.assignmentSummary.assignmentDetails.isOnlyScheduled && (
+                                          <p className="text-xs text-purple-600 font-medium">
+                                            📅 Scheduled only ({result.assignmentSummary.totalScheduledZones} scheduled)
+                                          </p>
+                                        )}
+                                        
+                                        {/* Assignment Breakdown */}
+                                        <div className="text-xs text-gray-600">
+                                          {result.assignmentSummary.assignmentDetails.hasIndividualAssignments && (
+                                            <span className="inline-block mr-2">
+                                              👤 {result.assignmentSummary.individualZones.length} individual
+                                            </span>
+                                          )}
+                                          {result.assignmentSummary.assignmentDetails.hasTeamAssignments && (
+                                            <span className="inline-block mr-2">
+                                              👥 {result.assignmentSummary.teamZones.length} team
+                                            </span>
+                                          )}
+                                          {result.assignmentSummary.assignmentDetails.hasScheduledIndividualAssignments && (
+                                            <span className="inline-block mr-2">
+                                              📅 {result.assignmentSummary.totalScheduledZones} scheduled
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Team Membership Information */}
+                                {result.teamMemberships && result.teamMemberships.length > 0 && (
+                                  <div className="mt-1">
+                                    <div className="flex flex-wrap gap-1">
+                                      {result.teamMemberships.map((team: any) => (
+                                        <span
+                                          key={team.teamId}
+                                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                            team.isPrimary
+                                              ? 'bg-blue-100 text-blue-800'
+                                              : 'bg-gray-100 text-gray-700'
+                                          }`}
+                                        >
+                                          {team.teamName}
+                                          {team.isPrimary && (
+                                            <span className="ml-1 text-blue-600">★</span>
+                                          )}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <p className="text-xs text-amber-600 mt-1">
+                                      Already in {result.teamMemberships.length} team(s)
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 ml-2">
+                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  result.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                                }`}>
+                                  {result.status}
+                                </span>
+                              </div>
+                            </div>
                           )}
                         </div>
                       ))}
@@ -2061,7 +2198,7 @@ export function TerritoryMap() {
                   {selectedAssignment && (
                     <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
                       <div className="flex items-center justify-between">
-                        <div>
+                        <div className="flex-1">
                           <div className="font-medium text-sm text-blue-900">
                             {assignmentType === "team" ? selectedAssignment.name : selectedAssignment.name}
                           </div>
@@ -2069,7 +2206,40 @@ export function TerritoryMap() {
                             <div className="text-xs text-blue-700">{selectedAssignment.email}</div>
                           )}
                           {assignmentType === "team" && selectedAssignment.agentIds && (
-                            <div className="text-xs text-blue-700">{selectedAssignment.agentIds.length} agents</div>
+                            <div className="text-xs text-blue-700">{selectedAssignment.agentIds.length} members</div>
+                          )}
+                          
+                          {/* Enhanced Assignment Status for Selected Item */}
+                          {assignmentType === "team" && selectedAssignment.performance && (
+                            <div className="mt-1">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                selectedAssignment.performance.zoneCoverage > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {selectedAssignment.performance.zoneCoverage > 0 ? '✓ Assigned' : '○ Unassigned'}
+                              </span>
+                              {selectedAssignment.performance.zoneCoverage > 0 && (
+                                <span className="text-xs text-blue-700 ml-2">
+                                  🗺️ {selectedAssignment.performance.zoneCoverage} zone(s)
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          
+                          {assignmentType === "individual" && selectedAssignment.assignmentSummary && (
+                            <div className="mt-1">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                selectedAssignment.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                                  ? 'bg-green-100 text-green-800'
+                                  : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {selectedAssignment.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                              </span>
+                              {selectedAssignment.assignmentSummary.assignmentDetails && (
+                                <span className="text-xs text-blue-700 ml-2">
+                                  {selectedAssignment.assignmentSummary.assignmentDetails.totalAssignments} assignment(s)
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
                         <Button

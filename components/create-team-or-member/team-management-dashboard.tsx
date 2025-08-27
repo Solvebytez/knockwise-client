@@ -17,13 +17,12 @@ import {
   Building,
   Activity,
   BarChart3,
-  Filter,
-  Download,
-  RefreshCw
+
 } from "lucide-react"
 import { apiInstance } from "@/lib/apiInstance"
 import { CreateMemberForm } from "./create-member-form"
 import { CreateTeamForm } from "./create-team-form"
+import { TeamMembersTable } from "./team-members-table"
 
 interface TeamStats {
   totalTeams: number
@@ -102,12 +101,30 @@ export function TeamManagementDashboard() {
   
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery({
     queryKey: ['team-stats'],
-    queryFn: fetchTeamStats
+    queryFn: fetchTeamStats,
+    staleTime: 3 * 60 * 1000, // 3 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error: any) => {
+      if (error?.response?.status === 429) {
+        return false;
+      }
+      return failureCount < 2;
+    }
   })
 
   const { data: performance, isLoading: performanceLoading, refetch: refetchPerformance } = useQuery({
     queryKey: ['team-performance'],
-    queryFn: fetchTeamPerformance
+    queryFn: fetchTeamPerformance,
+    staleTime: 3 * 60 * 1000, // 3 minutes
+    gcTime: 10 * 60 * 1000, // 10 minutes
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error: any) => {
+      if (error?.response?.status === 429) {
+        return false;
+      }
+      return failureCount < 2;
+    }
   })
 
   const handleRefresh = () => {
@@ -188,32 +205,6 @@ export function TeamManagementDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Actions */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold text-gray-800 border-l-4 border-[#42A5F5] pl-4">Team Overview Dashboard</h2>
-          <p className="text-sm text-gray-500 mt-2 italic">Monitor and manage your sales teams performance</p>
-        </div>
-        <div className="flex items-center space-x-3">
-          <Button variant="outline" size="sm" className="border-gray-300">
-            <Filter className="w-4 h-4 mr-2" />
-            Filter
-          </Button>
-          <Button variant="outline" size="sm" className="border-gray-300">
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="border-gray-300"
-            onClick={handleRefresh}
-          >
-            <RefreshCw className="w-4 h-4 mr-2" />
-            Refresh
-          </Button>
-        </div>
-      </div>
 
       {/* Quick Actions */}
       <Card className="border-gray-200 shadow-sm">
@@ -441,66 +432,10 @@ export function TeamManagementDashboard() {
         </Card>
       </div>
 
-      {/* Team Performance Table */}
-      <Card className="border-gray-200 shadow-sm">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-lg text-gray-900">Team Performance Overview</CardTitle>
-          <p className="text-sm text-gray-600">Detailed performance metrics for each team</p>
-        </CardHeader>
-        <CardContent>
-          {performanceLoading ? (
-            <div className="space-y-4">
-              {[...Array(4)].map((_, i) => (
-                <div key={i} className="animate-pulse">
-                  <div className="h-16 bg-gray-200 rounded-lg"></div>
-                </div>
-              ))}
-            </div>
-          ) : performance && performance.length > 0 ? (
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Team Name</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Members</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Avg Knocks</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Completion Rate</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Zone Coverage</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Performance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {performance.map((team) => (
-                    <tr key={team.teamId} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-4 font-medium text-gray-900">{team.teamName}</td>
-                      <td className="py-3 px-4 text-gray-600">{team.memberCount}</td>
-                      <td className="py-3 px-4 text-gray-600">{team.averageKnocks}</td>
-                      <td className="py-3 px-4 text-gray-600">{team.completionRate}%</td>
-                      <td className="py-3 px-4 text-gray-600">{team.zoneCoverage} zones</td>
-                      <td className="py-3 px-4">
-                        <div className="flex items-center">
-                          <Progress 
-                            value={team.completionRate} 
-                            className="h-2 w-20 mr-2" 
-                          />
-                          <span className="text-sm font-medium text-gray-700">
-                            {team.completionRate}%
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="text-center py-8">
-              <Building className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-              <p className="text-gray-500 text-sm">No teams found. Create your first team to see performance data.</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      
+
+      {/* Team Members Table */}
+      <TeamMembersTable />
     </div>
   )
 }

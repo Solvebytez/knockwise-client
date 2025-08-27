@@ -32,6 +32,34 @@ interface TeamMember {
   email: string
   role: string
   status: string
+  assignmentStatus?: string
+  teamMemberships?: Array<{
+    teamId: string
+    teamName: string
+    teamStatus: string
+    teamAssignmentStatus: string
+    isPrimary: boolean
+  }>
+  assignmentSummary?: {
+    totalActiveZones: number
+    totalScheduledZones: number
+    hasActiveAssignments: boolean
+    hasScheduledAssignments: boolean
+    individualZones: string[]
+    teamZones: string[]
+    scheduledZones: string[]
+    currentAssignmentStatus: string
+    assignmentDetails: {
+      hasIndividualAssignments: boolean
+      hasTeamAssignments: boolean
+      hasScheduledIndividualAssignments: boolean
+      hasScheduledTeamAssignments: boolean
+      totalAssignments: number
+      isFullyAssigned: boolean
+      isPartiallyAssigned: boolean
+      isOnlyScheduled: boolean
+    }
+  }
 }
 
 const createTeamMutation = async (data: CreateTeamRequest) => {
@@ -41,8 +69,8 @@ const createTeamMutation = async (data: CreateTeamRequest) => {
 
 const searchTeamMembers = async (query: string): Promise<TeamMember[]> => {
   try {
-    // Remove status filter to get all agents created by the admin
-    const url = `/users/my-created-agents?search=${encodeURIComponent(query)}&limit=20`
+    // Enhanced search with team membership information - only show active agents
+    const url = `/users/my-created-agents?search=${encodeURIComponent(query)}&limit=20&includeTeamInfo=true&status=ACTIVE`
     const response = await apiInstance.get(url)
     return response.data.data
   } catch (error) {
@@ -264,11 +292,90 @@ export function CreateTeamForm({ onSuccess }: CreateTeamFormProps) {
                             className="w-full p-3 text-left hover:bg-gray-50 focus:bg-gray-50 focus:outline-none"
                           >
                             <div className="flex items-center justify-between">
-                              <div>
+                              <div className="flex-1">
                                 <p className="font-medium text-gray-900">{member.name}</p>
                                 <p className="text-sm text-gray-500">{member.email}</p>
+                                
+                                {/* Assignment Status Badge */}
+                                {member.assignmentSummary && (
+                                  <div className="mt-1">
+                                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                      member.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                      {member.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                                    </span>
+                                    
+                                    {/* Detailed Assignment Status */}
+                                    {member.assignmentSummary.assignmentDetails && (
+                                      <div className="mt-1 space-y-1">
+                                        {member.assignmentSummary.assignmentDetails.isFullyAssigned && (
+                                          <p className="text-xs text-green-600 font-medium">
+                                            ✓ Fully assigned ({member.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                          </p>
+                                        )}
+                                        {member.assignmentSummary.assignmentDetails.isPartiallyAssigned && (
+                                          <p className="text-xs text-yellow-600 font-medium">
+                                            ⚠ Partially assigned ({member.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                          </p>
+                                        )}
+                                        {member.assignmentSummary.assignmentDetails.isOnlyScheduled && (
+                                          <p className="text-xs text-purple-600 font-medium">
+                                            📅 Scheduled only ({member.assignmentSummary.totalScheduledZones} scheduled)
+                                          </p>
+                                        )}
+                                        
+                                        {/* Assignment Breakdown */}
+                                        <div className="text-xs text-gray-600">
+                                          {member.assignmentSummary.assignmentDetails.hasIndividualAssignments && (
+                                            <span className="inline-block mr-2">
+                                              👤 {member.assignmentSummary.totalActiveZones - member.assignmentSummary.teamZones.length} individual
+                                            </span>
+                                          )}
+                                          {member.assignmentSummary.assignmentDetails.hasTeamAssignments && (
+                                            <span className="inline-block mr-2">
+                                              👥 {member.assignmentSummary.teamZones.length} team
+                                            </span>
+                                          )}
+                                          {member.assignmentSummary.assignmentDetails.hasScheduledIndividualAssignments && (
+                                            <span className="inline-block mr-2">
+                                              📅 {member.assignmentSummary.totalScheduledZones} scheduled
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                                
+                                {/* Team Membership Information */}
+                                {member.teamMemberships && member.teamMemberships.length > 0 && (
+                                  <div className="mt-1">
+                                    <div className="flex flex-wrap gap-1">
+                                      {member.teamMemberships.map((team, index) => (
+                                        <span
+                                          key={team.teamId}
+                                          className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                            team.isPrimary
+                                              ? 'bg-blue-100 text-blue-800'
+                                              : 'bg-gray-100 text-gray-700'
+                                          }`}
+                                        >
+                                          {team.teamName}
+                                          {team.isPrimary && (
+                                            <span className="ml-1 text-blue-600">★</span>
+                                          )}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    <p className="text-xs text-amber-600 mt-1">
+                                      Already in {member.teamMemberships.length} team(s)
+                                    </p>
+                                  </div>
+                                )}
                               </div>
-                              <UserPlus className="w-4 h-4 text-gray-400" />
+                              <UserPlus className="w-4 h-4 text-gray-400 ml-2" />
                             </div>
                           </button>
                         ))}
@@ -310,9 +417,15 @@ export function CreateTeamForm({ onSuccess }: CreateTeamFormProps) {
 
                      <div className="bg-blue-50 rounded-lg p-3 border border-blue-100">
              <div className="text-sm text-blue-700">
-               <strong>Note:</strong> Search for team members by typing their name or email. 
-               All agents created by this admin will be shown in search results. 
-               Team leader will be automatically assigned from the selected members.
+               <strong>Enhanced Assignment Status:</strong> Search results now show detailed assignment information.
+               <ul className="mt-2 space-y-1 text-xs">
+                 <li>• <span className="bg-green-100 text-green-800 px-1 rounded">✓ Assigned</span> shows fully assigned agents</li>
+                 <li>• <span className="bg-gray-100 text-gray-600 px-1 rounded">○ Unassigned</span> shows agents without assignments</li>
+                 <li>• <span className="bg-blue-100 text-blue-800 px-1 rounded">Team Name ★</span> indicates primary team</li>
+                 <li>• <span className="bg-gray-100 text-gray-700 px-1 rounded">Team Name</span> shows other team memberships</li>
+                 <li>• 👤 Individual, 👥 Team, 📅 Scheduled show assignment breakdown</li>
+                 <li>• Team leader will be automatically assigned from selected members</li>
+               </ul>
              </div>
            </div>
 

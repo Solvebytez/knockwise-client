@@ -16,6 +16,34 @@ interface TeamMember {
   name: string
   email: string
   status: string
+  assignmentStatus?: string
+  teamMemberships?: Array<{
+    teamId: string
+    teamName: string
+    teamStatus: string
+    teamAssignmentStatus: string
+    isPrimary: boolean
+  }>
+  assignmentSummary?: {
+    totalActiveZones: number
+    totalScheduledZones: number
+    hasActiveAssignments: boolean
+    hasScheduledAssignments: boolean
+    individualZones: string[]
+    teamZones: string[]
+    scheduledZones: string[]
+    currentAssignmentStatus: string
+    assignmentDetails: {
+      hasIndividualAssignments: boolean
+      hasTeamAssignments: boolean
+      hasScheduledIndividualAssignments: boolean
+      hasScheduledTeamAssignments: boolean
+      totalAssignments: number
+      isFullyAssigned: boolean
+      isPartiallyAssigned: boolean
+      isOnlyScheduled: boolean
+    }
+  }
 }
 
 interface Team {
@@ -41,17 +69,6 @@ interface EditTeamFormProps {
   onCancel?: () => void
 }
 
-const searchTeamMembers = async (query: string): Promise<TeamMember[]> => {
-  try {
-    const url = `/users/my-created-agents?search=${encodeURIComponent(query)}&limit=20`
-    const response = await apiInstance.get(url)
-    return response.data.data
-  } catch (error) {
-    console.error('Error searching team members:', error)
-    throw error
-  }
-}
-
 export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
   const queryClient = useQueryClient()
   const [teamName, setTeamName] = useState(team.name)
@@ -66,6 +83,19 @@ export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
     }))
   )
   const [showSearchResults, setShowSearchResults] = useState(false)
+
+  const searchTeamMembers = async (query: string): Promise<TeamMember[]> => {
+    try {
+      // Enhanced search with team membership information
+      // Exclude current team members from search results and only show active agents
+      const url = `/users/my-created-agents?search=${encodeURIComponent(query)}&limit=20&includeTeamInfo=true&excludeTeamId=${team._id}&status=ACTIVE`
+      const response = await apiInstance.get(url)
+      return response.data.data
+    } catch (error) {
+      console.error('Error searching team members:', error)
+      throw error
+    }
+  }
 
   const { data: searchResults, isLoading: isLoadingSearch } = useQuery<TeamMember[]>({
     queryKey: ['teamMembersSearch', searchQuery],
@@ -83,17 +113,44 @@ export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
       const response = await apiInstance.put(`/teams/${team._id}`, updatedTeam)
       return response.data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] })
       queryClient.invalidateQueries({ queryKey: ['teamStats'] })
       queryClient.invalidateQueries({ queryKey: ['teamPerformance'] })
       queryClient.invalidateQueries({ queryKey: ['myCreatedAgents'] }) // Refresh agent data to show updated zone assignments
-      toast.success('Team updated successfully. Zone assignments have been synced for all team members.')
+      
+      // Show success message with details
+      const message = data?.message || 'Team updated successfully';
+      toast.success(message);
+      
       onSuccess?.()
     },
     onError: (error: any) => {
       console.error("Error updating team:", error.response?.data || error.message)
-      toast.error(`Failed to update team: ${error.response?.data?.message || error.message}`)
+      
+      // Handle different types of errors with specific messages
+      if (error.response?.data?.message) {
+        // Backend business logic errors
+        toast.error(error.response.data.message);
+      } else if (error.response?.status === 409) {
+        // Conflict errors (team name already exists)
+        toast.error('Team name already exists. Please use a different name.');
+      } else if (error.response?.status === 401) {
+        // Authentication errors
+        toast.error('Authentication failed. Please log in again.');
+      } else if (error.response?.status === 403) {
+        // Permission errors
+        toast.error('You do not have permission to update this team.');
+      } else if (error.response?.status >= 500) {
+        // Server errors
+        toast.error('Server error. Please try again later.');
+      } else if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        // Network errors
+        toast.error('Network error. Please check your connection and try again.');
+      } else {
+        // Generic error
+        toast.error('Failed to update team. Please try again.');
+      }
     },
   })
 
@@ -113,6 +170,21 @@ export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
     e.preventDefault()
     if (!teamName.trim() || selectedMembers.length === 0) {
       toast.error("Team name and at least one member are required.")
+      return
+    }
+
+    // Check if any changes were made
+    const originalMemberIds = team.agentIds.map(agent => agent._id);
+    const newMemberIds = selectedMembers.map(m => m._id);
+    const hasMemberChanges = originalMemberIds.length !== newMemberIds.length || 
+      originalMemberIds.some(id => !newMemberIds.includes(id)) ||
+      newMemberIds.some(id => !originalMemberIds.includes(id));
+    
+    const hasNameChange = teamName !== team.name;
+    const hasDescriptionChange = description !== (team.description || '');
+    
+    if (!hasMemberChanges && !hasNameChange && !hasDescriptionChange) {
+      toast.info("No changes detected. The team is already up to date.")
       return
     }
     
@@ -178,11 +250,93 @@ export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
                     className="flex items-center justify-between p-3 hover:bg-gray-100 cursor-pointer"
                     onMouseDown={() => handleSelectMember(member)}
                   >
-                    <div>
-                      <p className="font-medium text-gray-900">{member.name}</p>
-                      <p className="text-sm text-gray-500">{member.email}</p>
+                                         <div className="flex-1">
+                       <p className="font-medium text-gray-900">{member.name}</p>
+                       <p className="text-sm text-gray-500">{member.email}</p>
+                       
+                       {/* Assignment Status Badge */}
+                       {member.assignmentSummary && (
+                         <div className="mt-1">
+                           <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                             member.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                               ? 'bg-green-100 text-green-800'
+                               : 'bg-gray-100 text-gray-600'
+                           }`}>
+                             {member.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                           </span>
+                           
+                           {/* Detailed Assignment Status */}
+                           {member.assignmentSummary.assignmentDetails && (
+                             <div className="mt-1 space-y-1">
+                               {member.assignmentSummary.assignmentDetails.isFullyAssigned && (
+                                 <p className="text-xs text-green-600 font-medium">
+                                   ✓ Fully assigned ({member.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                 </p>
+                               )}
+                               {member.assignmentSummary.assignmentDetails.isPartiallyAssigned && (
+                                 <p className="text-xs text-yellow-600 font-medium">
+                                   ⚠ Partially assigned ({member.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                 </p>
+                               )}
+                               {member.assignmentSummary.assignmentDetails.isOnlyScheduled && (
+                                 <p className="text-xs text-purple-600 font-medium">
+                                   📅 Scheduled only ({member.assignmentSummary.totalScheduledZones} scheduled)
+                                 </p>
+                               )}
+                               
+                               {/* Assignment Breakdown */}
+                               <div className="text-xs text-gray-600">
+                                 {member.assignmentSummary.assignmentDetails.hasIndividualAssignments && (
+                                   <span className="inline-block mr-2">
+                                     👤 {member.assignmentSummary.totalActiveZones - member.assignmentSummary.teamZones.length} individual
+                                   </span>
+                                 )}
+                                 {member.assignmentSummary.assignmentDetails.hasTeamAssignments && (
+                                   <span className="inline-block mr-2">
+                                     👥 {member.assignmentSummary.teamZones.length} team
+                                   </span>
+                                 )}
+                                 {member.assignmentSummary.assignmentDetails.hasScheduledIndividualAssignments && (
+                                   <span className="inline-block mr-2">
+                                     📅 {member.assignmentSummary.totalScheduledZones} scheduled
+                                   </span>
+                                 )}
+                               </div>
+                             </div>
+                           )}
+                         </div>
+                       )}
+                       
+                       {/* Team Membership Information */}
+                       {member.teamMemberships && member.teamMemberships.length > 0 && (
+                         <div className="mt-1">
+                           <div className="flex flex-wrap gap-1">
+                             {member.teamMemberships.map((team) => (
+                               <span
+                                 key={team.teamId}
+                                 className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                   team.isPrimary
+                                     ? 'bg-blue-100 text-blue-800'
+                                     : 'bg-gray-100 text-gray-700'
+                                 }`}
+                               >
+                                 {team.teamName}
+                                 {team.isPrimary && (
+                                   <span className="ml-1 text-blue-600">★</span>
+                                 )}
+                               </span>
+                             ))}
+                           </div>
+                           <p className="text-xs text-amber-600 mt-1">
+                             Already in {member.teamMemberships.length} team(s)
+                           </p>
+                         </div>
+                       )}
+                     </div>
+                    <div className="flex items-center gap-2 ml-2">
+                      <Badge variant="secondary" className="text-xs">{member.status}</Badge>
+                      <UserPlus className="w-4 h-4 text-gray-400" />
                     </div>
-                    <Badge variant="secondary" className="text-xs">{member.status}</Badge>
                   </div>
                 ))
               ) : (
@@ -231,13 +385,20 @@ export function EditTeamForm({ team, onSuccess, onCancel }: EditTeamFormProps) {
         >
           Cancel
         </Button>
-        <Button
-          type="submit"
-          className="bg-[#42A5F5] hover:bg-[#357ABD] text-white py-2 px-4 rounded-md transition-colors"
-          disabled={updateTeamMutation.isPending}
-        >
-          {updateTeamMutation.isPending ? "Updating Team..." : "Update Team"}
-        </Button>
+                 <Button
+           type="submit"
+           className="bg-[#42A5F5] hover:bg-[#357ABD] text-white py-2 px-4 rounded-md transition-colors"
+           disabled={updateTeamMutation.isPending}
+         >
+           {updateTeamMutation.isPending ? (
+             <>
+               <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+               Updating Team...
+             </>
+           ) : (
+             "Update Team"
+           )}
+         </Button>
       </div>
     </form>
   )

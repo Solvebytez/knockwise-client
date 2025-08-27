@@ -44,11 +44,60 @@ interface Agent {
   _id: string
   name: string
   email: string
+  status: string
+  assignmentStatus?: string
+  teamMemberships?: Array<{
+    teamId: string
+    teamName: string
+    teamStatus: string
+    teamAssignmentStatus: string
+    isPrimary: boolean
+  }>
+  assignmentSummary?: {
+    totalActiveZones: number
+    totalScheduledZones: number
+    hasActiveAssignments: boolean
+    hasScheduledAssignments: boolean
+    individualZones: string[]
+    teamZones: string[]
+    scheduledZones: string[]
+    currentAssignmentStatus: string
+    assignmentDetails: {
+      hasIndividualAssignments: boolean
+      hasTeamAssignments: boolean
+      hasScheduledIndividualAssignments: boolean
+      hasScheduledTeamAssignments: boolean
+      totalAssignments: number
+      isFullyAssigned: boolean
+      isPartiallyAssigned: boolean
+      isOnlyScheduled: boolean
+    }
+  }
 }
 
 interface Team {
   _id: string
   name: string
+  description?: string
+  leaderId?: {
+    _id: string
+    name: string
+    email: string
+  }
+  agentIds?: Array<{
+    _id: string
+    name: string
+    email: string
+    status: string
+  }>
+  status?: string
+  performance?: {
+    totalMembers: number
+    activeMembers: number
+    averageKnocks: number
+    completionRate: number
+    zoneCoverage: number
+  }
 }
 
 interface TerritoryEditSidebarProps {
@@ -259,6 +308,17 @@ export function TerritoryEditSidebar({
       description: territoryDescription.trim(),
     }
 
+    // Check if this is a date-only change
+    const currentAssignment = territory.currentAssignment
+    const isDateOnlyChange = !updateData.name && 
+                           !updateData.description && 
+                           assignedDate && 
+                           currentAssignment &&
+                           ((assignmentType === 'individual' && 
+                             assignedRep === currentAssignment.agentId?._id) ||
+                            (assignmentType === 'team' && 
+                             selectedTeam === currentAssignment.teamId?._id))
+
     // Add assignment data based on type
     if (assignmentType === 'none') {
       // Remove all assignments - will set status to DRAFT
@@ -273,6 +333,12 @@ export function TerritoryEditSidebar({
       if (assignedDate) {
         updateData.effectiveFrom = new Date(assignedDate).toISOString()
       }
+    }
+
+    // Add flag for date-only changes
+    if (isDateOnlyChange) {
+      updateData.isDateOnlyChange = true
+      console.log('🎯 DETECTED: Date-only change')
     }
 
     console.log('Submitting update data:', updateData)
@@ -728,22 +794,58 @@ export function TerritoryEditSidebar({
                     disabled={isUpdating}
                   />
                   {/* Show matching teams */}
-                  {teamSearchText && !selectedTeam && (() => {
+                  {teamSearchText && (() => {
                     const matchingTeams = availableTeams.filter(team => 
-                      team.name.toLowerCase().includes(teamSearchText.toLowerCase())
+                      team.name.toLowerCase().includes(teamSearchText.toLowerCase()) &&
+                      team._id !== selectedTeam  // Exclude currently selected team
                     )
                     return matchingTeams.length > 0 && (
-                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
+                      <div className="mt-2 space-y-1 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
                         {matchingTeams.map((team) => (
                           <div
                             key={team._id}
-                            className="p-2 hover:bg-gray-100 rounded cursor-pointer text-sm"
+                            className="p-3 hover:bg-gray-100 rounded cursor-pointer"
                             onClick={() => {
                               setSelectedTeam(team._id)
                               setTeamSearchText(team.name)
                             }}
                           >
-                            {team.name}
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{team.name}</p>
+                              <p className="text-sm text-gray-500">
+                                {team.agentIds?.length || 0} members
+                              </p>
+                              
+                              {/* Assignment Status Badge */}
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ${
+                                team.performance?.zoneCoverage > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {team.performance?.zoneCoverage > 0 ? '✓ Assigned' : '○ Unassigned'}
+                              </span>
+                              
+                              {/* Current Zone Coverage */}
+                              {team.performance?.zoneCoverage > 0 && (
+                                <div className="mt-1">
+                                  <p className="text-xs text-blue-600">
+                                    🗺️ Currently assigned to {team.performance.zoneCoverage} zone(s)
+                                  </p>
+                                </div>
+                              )}
+                              
+                              {/* Team Leader */}
+                              {team.leaderId && (
+                                <p className="text-xs text-gray-600 mt-1">
+                                  👑 Leader: {team.leaderId.name}
+                                </p>
+                              )}
+                              
+                              {/* Team Status */}
+                              {team.status && (
+                                <p className="text-xs text-gray-600">
+                                  Status: {team.status}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -788,23 +890,109 @@ export function TerritoryEditSidebar({
                     disabled={isUpdating}
                   />
                   {/* Show matching agents */}
-                  {agentSearchText && !assignedRep && (() => {
+                  {agentSearchText && (() => {
                     const matchingAgents = availableAgents.filter(agent => 
-                      agent.name.toLowerCase().includes(agentSearchText.toLowerCase()) ||
-                      agent.email.toLowerCase().includes(agentSearchText.toLowerCase())
+                      (agent.name.toLowerCase().includes(agentSearchText.toLowerCase()) ||
+                      agent.email.toLowerCase().includes(agentSearchText.toLowerCase())) &&
+                      agent._id !== assignedRep  // Exclude currently selected agent
                     )
                     return matchingAgents.length > 0 && (
-                      <div className="mt-2 space-y-1 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
+                      <div className="mt-2 space-y-1 max-h-64 overflow-y-auto border border-gray-200 rounded-md p-2 bg-white" style={{ scrollbarWidth: 'thin', scrollbarColor: '#9CA3AF #F3F4F6' }}>
                         {matchingAgents.map((agent) => (
                           <div
                             key={agent._id}
-                            className="p-2 hover:bg-gray-100 rounded cursor-pointer text-sm"
+                            className="flex items-center justify-between p-3 hover:bg-gray-100 rounded cursor-pointer"
                             onClick={() => {
                               setAssignedRep(agent._id)
                               setAgentSearchText(`${agent.name} (${agent.email})`)
                             }}
                           >
-                            {agent.name} ({agent.email})
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{agent.name}</p>
+                              <p className="text-sm text-gray-500">{agent.email}</p>
+                              
+                              {/* Assignment Status Badge */}
+                              {agent.assignmentSummary && (
+                                <div className="mt-1">
+                                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    agent.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {agent.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                                  </span>
+                                  
+                                  {/* Detailed Assignment Status */}
+                                  {agent.assignmentSummary.assignmentDetails && (
+                                    <div className="mt-1 space-y-1">
+                                      {agent.assignmentSummary.assignmentDetails.isFullyAssigned && (
+                                        <p className="text-xs text-green-600 font-medium">
+                                          ✓ Fully assigned ({agent.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                        </p>
+                                      )}
+                                      {agent.assignmentSummary.assignmentDetails.isPartiallyAssigned && (
+                                        <p className="text-xs text-yellow-600 font-medium">
+                                          ⚠ Partially assigned ({agent.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                        </p>
+                                      )}
+                                      {agent.assignmentSummary.assignmentDetails.isOnlyScheduled && (
+                                        <p className="text-xs text-purple-600 font-medium">
+                                          📅 Scheduled only ({agent.assignmentSummary.totalScheduledZones} scheduled)
+                                        </p>
+                                      )}
+                                      
+                                      {/* Assignment Breakdown */}
+                                      <div className="text-xs text-gray-600">
+                                        {agent.assignmentSummary.assignmentDetails.hasIndividualAssignments && (
+                                          <span className="inline-block mr-2">
+                                            👤 {agent.assignmentSummary.individualZones.length} individual
+                                          </span>
+                                        )}
+                                        {agent.assignmentSummary.assignmentDetails.hasTeamAssignments && (
+                                          <span className="inline-block mr-2">
+                                            👥 {agent.assignmentSummary.teamZones.length} team
+                                          </span>
+                                        )}
+                                        {agent.assignmentSummary.assignmentDetails.hasScheduledIndividualAssignments && (
+                                          <span className="inline-block mr-2">
+                                            📅 {agent.assignmentSummary.totalScheduledZones} scheduled
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* Team Membership Information */}
+                              {agent.teamMemberships && agent.teamMemberships.length > 0 && (
+                                <div className="mt-1">
+                                  <div className="flex flex-wrap gap-1">
+                                    {agent.teamMemberships.map((team) => (
+                                      <span
+                                        key={team.teamId}
+                                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                          team.isPrimary
+                                            ? 'bg-blue-100 text-blue-800'
+                                            : 'bg-gray-100 text-gray-700'
+                                        }`}
+                                      >
+                                        {team.teamName}
+                                        {team.isPrimary && (
+                                          <span className="ml-1 text-blue-600">★</span>
+                                        )}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <p className="text-xs text-amber-600 mt-1">
+                                    Already in {agent.teamMemberships.length} team(s)
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 ml-2">
+                              <Badge variant="secondary" className="text-xs">{agent.status}</Badge>
+                            </div>
                           </div>
                         ))}
                       </div>

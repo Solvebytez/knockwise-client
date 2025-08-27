@@ -28,11 +28,16 @@ import {
   CheckCircle,
   Map as MapIcon,
   Layers,
-  Satellite
+  Satellite,
+  Gauge,
+  Download,
+  X,
+  Edit
 } from 'lucide-react'
 import { apiInstance } from '@/lib/apiInstance'
 import { toast } from 'sonner'
 import { useRouter } from 'next/navigation'
+import { PropertyDetailModal } from './property-detail-modal'
 
 const libraries: ("drawing" | "geometry" | "places")[] = ["drawing", "geometry", "places"]
 
@@ -45,7 +50,7 @@ interface Property {
   address: string
   houseNumber: number
   coordinates: [number, number]
-  status: 'Not Answered' | 'Interested' | 'Visited' | 'Callback' | 'Appointment' | 'Follow-up' | 'Not Interested'
+  status: 'not-visited' | 'interested' | 'visited' | 'callback' | 'appointment' | 'follow-up' | 'not-interested'
   lastVisited?: string
   notes?: string
   residents?: {
@@ -95,6 +100,26 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
   const [properties, setProperties] = useState<Property[]>([])
   const [filteredProperties, setFilteredProperties] = useState<Property[]>([])
   const [selectedProperty, setSelectedProperty] = useState<Property | null>(null)
+  const [detailedProperty, setDetailedProperty] = useState<any>(null)
+  const [isLoadingPropertyDetails, setIsLoadingPropertyDetails] = useState(false)
+  const [isUpdatingResident, setIsUpdatingResident] = useState(false)
+  const [editFormData, setEditFormData] = useState({
+    address: '',
+    houseNumber: '',
+    longitude: '',
+    latitude: '',
+    status: 'not-visited' as any,
+    lastVisited: '',
+    notes: '',
+    phone: '',
+    email: '',
+    ownerName: '',
+    ownerPhone: '',
+    ownerEmail: '',
+    ownerMailingAddress: ''
+  })
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<string>('All Status')
   const [sortBy, setSortBy] = useState<string>('Sequential')
@@ -199,7 +224,26 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
     }
   }, [territory])
 
-  const handlePropertyClick = (property: Property) => {
+  const fetchPropertyDetails = async (propertyId: string) => {
+    try {
+      setIsLoadingPropertyDetails(true)
+      const response = await apiInstance.get(`/residents/${propertyId}`)
+      console.log('🔍 API Response Data:', response.data.data)
+      console.log('🏠 Resident Data:', response.data.data.resident)
+      console.log('🏘️ Property Data:', response.data.data.propertyData)
+      console.log('🗺️ Zone Data:', response.data.data.zone)
+      console.log('📊 Zone Stats:', response.data.data.zoneStats)
+      setDetailedProperty(response.data.data) // Now contains comprehensive data
+    } catch (error) {
+      console.error('Error fetching property details:', error)
+      toast.error('Failed to load property details')
+      setDetailedProperty(null)
+    } finally {
+      setIsLoadingPropertyDetails(false)
+    }
+  }
+
+  const handlePropertyClick = async (property: Property) => {
     setSelectedProperty(property)
     
     // Center map on selected property
@@ -209,6 +253,207 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
         lng: property.coordinates[0]
       })
       mapRef.current.setZoom(18)
+    }
+
+    // Fetch detailed property information
+    await fetchPropertyDetails(property._id)
+  }
+
+  const handleViewDetails = () => {
+    setIsDetailModalOpen(true)
+  }
+
+  const handleCloseDetailModal = () => {
+    setIsDetailModalOpen(false)
+  }
+
+
+
+  const handleCloseEditModal = () => {
+    setIsEditModalOpen(false)
+    setSelectedProperty(null)
+    // Reset form data
+    setEditFormData({
+      address: '',
+      houseNumber: '',
+      longitude: '',
+      latitude: '',
+      status: 'not-visited',
+      lastVisited: '',
+      notes: '',
+      phone: '',
+      email: '',
+      ownerName: '',
+      ownerPhone: '',
+      ownerEmail: '',
+      ownerMailingAddress: ''
+    })
+  }
+
+  const handleEditProperty = (property: Property) => {
+    setSelectedProperty(property)
+    setIsEditModalOpen(true)
+    
+    // Debug: Log the lastVisited values
+    console.log('🔍 Debug - Property lastVisited:', property.lastVisited);
+    console.log('🔍 Debug - DetailedProperty lastVisited:', detailedProperty?.resident?.lastVisited);
+    
+    // Initialize form data with current property values
+    setEditFormData({
+      address: property.address,
+      houseNumber: property.houseNumber?.toString() || '',
+      longitude: property.coordinates[0]?.toString() || '',
+      latitude: property.coordinates[1]?.toString() || '',
+      status: property.status,
+      lastVisited: (() => {
+        const detailedDate = detailedProperty?.resident?.lastVisited ? new Date(detailedProperty.resident.lastVisited).toISOString().split('T')[0] : '';
+        const propertyDate = property.lastVisited ? new Date(property.lastVisited).toISOString().split('T')[0] : '';
+        const finalDate = detailedDate || propertyDate;
+        console.log('🔍 Debug - Formatted lastVisited date:', finalDate);
+        return finalDate;
+      })(),
+      notes: detailedProperty?.resident?.notes || property.notes || '',
+      phone: detailedProperty?.resident?.phone || property.residents?.[0]?.phone || '',
+      email: detailedProperty?.resident?.email || property.residents?.[0]?.email || '',
+      // Get owner information from detailed property data if available
+      ownerName: detailedProperty?.propertyData?.ownerName || '',
+      ownerPhone: detailedProperty?.propertyData?.ownerPhone || '',
+      ownerEmail: detailedProperty?.propertyData?.ownerEmail || '',
+      ownerMailingAddress: detailedProperty?.propertyData?.ownerMailingAddress || ''
+    })
+    // Prevent the property details modal from opening
+    setIsDetailModalOpen(false)
+  }
+
+  const handleFormChange = (field: string, value: string) => {
+    if (isUpdatingResident) return // Prevent changes during update
+    setEditFormData(prev => ({
+      ...prev,
+      [field]: value
+    }))
+  }
+
+  const handleUpdateResident = async () => {
+    if (!selectedProperty) return
+
+    try {
+      setIsUpdatingResident(true)
+
+      const updateData = {
+        address: editFormData.address,
+        houseNumber: editFormData.houseNumber ? parseInt(editFormData.houseNumber) : undefined,
+        coordinates: [parseFloat(editFormData.longitude), parseFloat(editFormData.latitude)],
+        status: editFormData.status,
+        lastVisited: editFormData.lastVisited || undefined,
+        notes: editFormData.notes || undefined,
+        phone: editFormData.phone || undefined,
+        email: editFormData.email || undefined,
+        // Owner information (these might need to be handled separately for PropertyData)
+        ownerName: editFormData.ownerName || undefined,
+        ownerPhone: editFormData.ownerPhone || undefined,
+        ownerEmail: editFormData.ownerEmail || undefined,
+        ownerMailingAddress: editFormData.ownerMailingAddress || undefined
+      }
+
+      console.log('🔄 Updating resident:', selectedProperty._id, updateData)
+
+      const response = await apiInstance.put(`/residents/${selectedProperty._id}`, updateData)
+      
+      console.log('✅ Update response:', response.data)
+
+      if (response.data.success) {
+        toast.success('Resident updated successfully! You can continue editing or close the modal.')
+        
+        // Update the local state
+        setProperties(prev => prev.map(prop => 
+          prop._id === selectedProperty._id 
+            ? { 
+                ...prop, 
+                address: updateData.address,
+                houseNumber: updateData.houseNumber || prop.houseNumber,
+                coordinates: updateData.coordinates as [number, number],
+                status: updateData.status,
+                lastVisited: updateData.lastVisited,
+                notes: updateData.notes,
+                phone: updateData.phone,
+                email: updateData.email
+              }
+            : prop
+        ))
+        
+        // Update the selected property with new data
+        setSelectedProperty(prev => prev ? {
+          ...prev,
+          address: updateData.address,
+          houseNumber: updateData.houseNumber || prev.houseNumber,
+          coordinates: updateData.coordinates as [number, number],
+          status: updateData.status,
+          lastVisited: updateData.lastVisited,
+          notes: updateData.notes,
+          phone: updateData.phone,
+          email: updateData.email
+        } : null)
+        
+        // Update the detailed property data to reflect changes in the card
+        setDetailedProperty((prev: any) => prev ? {
+          ...prev,
+          resident: {
+            ...prev.resident,
+            address: updateData.address,
+            houseNumber: updateData.houseNumber || prev.resident?.houseNumber,
+            coordinates: updateData.coordinates as [number, number],
+            status: updateData.status,
+            lastVisited: updateData.lastVisited,
+            notes: updateData.notes,
+            phone: updateData.phone,
+            email: updateData.email
+          },
+          propertyData: response.data.data.propertyData ? {
+            ...prev.propertyData,
+            ownerName: updateData.ownerName,
+            ownerPhone: updateData.ownerPhone,
+            ownerEmail: updateData.ownerEmail,
+            ownerMailingAddress: updateData.ownerMailingAddress
+          } : prev.propertyData
+        } : null)
+        
+        // Update form data with the response data to show updated values
+        setEditFormData({
+          address: updateData.address,
+          houseNumber: updateData.houseNumber?.toString() || '',
+          longitude: updateData.coordinates[0]?.toString() || '',
+          latitude: updateData.coordinates[1]?.toString() || '',
+          status: updateData.status,
+          lastVisited: updateData.lastVisited || '',
+          notes: updateData.notes || '',
+          phone: updateData.phone || '',
+          email: updateData.email || '',
+          ownerName: updateData.ownerName || '',
+          ownerPhone: updateData.ownerPhone || '',
+          ownerEmail: updateData.ownerEmail || '',
+          ownerMailingAddress: updateData.ownerMailingAddress || ''
+        })
+        
+        // Modal stays open - user can see updated values
+        // User can manually close or make more changes
+      }
+    } catch (error: any) {
+      console.error('❌ Error updating resident:', error)
+      
+      if (error.response?.data?.message) {
+        toast.error(error.response.data.message)
+      } else {
+        toast.error('Failed to update resident')
+      }
+    } finally {
+      setIsUpdatingResident(false)
+    }
+  }
+
+  const handleExportProperty = () => {
+    if (selectedProperty) {
+      // Export logic here
+      toast.success('Property data exported successfully')
     }
   }
 
@@ -313,26 +558,17 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
               <span className="hidden sm:inline">Focus Current Zone</span>
               <span className="sm:hidden">Focus</span>
             </Button>
-            <Badge 
-              variant="secondary"
+            <div 
+              className="text-xs sm:text-sm font-medium px-2 py-1"
               style={{ 
-                backgroundColor: territory?.status === 'ACTIVE' ? '#10B98120' : 
-                               territory?.status === 'SCHEDULED' ? '#F59E0B20' : 
-                               territory?.status === 'DRAFT' ? '#6B728020' : 
-                               territory?.status === 'COMPLETED' ? '#3B82F620' : '#6B728020',
                 color: territory?.status === 'ACTIVE' ? '#10B981' : 
-                       territory?.status === 'SCHEDULED' ? '#F59E0B' : 
-                       territory?.status === 'DRAFT' ? '#6B7280' : 
-                       territory?.status === 'COMPLETED' ? '#3B82F6' : '#6B7280',
-                borderColor: territory?.status === 'ACTIVE' ? '#10B981' : 
                             territory?.status === 'SCHEDULED' ? '#F59E0B' : 
                             territory?.status === 'DRAFT' ? '#6B7280' : 
                             territory?.status === 'COMPLETED' ? '#3B82F6' : '#6B7280'
               }}
-              className="text-xs sm:text-sm font-medium"
             >
               {territory?.status || 'Loading...'}
-            </Badge>
+            </div>
             {territory?.assignedTo && (
               <div className="text-xs sm:text-sm text-gray-600 hidden sm:block">
                 Assigned to: <span className="font-medium">{territory.assignedTo.name}</span>
@@ -349,7 +585,7 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                       {/* Fixed Stats Header */}
             <div className="p-3 border-b border-gray-200 flex-shrink-0">
               <div className="flex justify-between items-center mb-3">
-                <h2 className="text-base sm:text-lg font-medium text-gray-700">Properties</h2>
+                <h2 className="text-lg sm:text-xl font-medium text-gray-700">Properties</h2>
               </div>
               
               {/* Stats Cards */}
@@ -454,61 +690,51 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
             {filteredProperties.map((property, index) => (
               <div
                 key={property._id}
-                className={`p-3 sm:p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${
+                className={`p-3 sm:p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors group ${
                   selectedProperty?._id === property._id ? 'bg-blue-50 border-l-4 border-l-blue-500' : ''
                 }`}
                 onClick={() => handlePropertyClick(property)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-medium text-gray-900 text-sm sm:text-base xl:text-base truncate xl:whitespace-normal xl:break-words">{property.address}</h3>
-                      <Badge 
-                        variant="secondary"
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="font-medium text-gray-900 text-sm sm:text-sm xl:text-sm leading-tight break-words flex-1 mr-2">{property.address}</h3>
+                      <div className="flex items-center gap-1">
+                        <div 
+                          className="text-[10px] flex-shrink-0 truncate px-2 py-1 rounded"
                         style={{ 
-                          backgroundColor: statusColors[property.status] + '20',
                           color: statusColors[property.status],
-                          borderColor: statusColors[property.status]
+                            backgroundColor: statusColors[property.status] + '20'
                         }}
-                        className="text-xs flex-shrink-0 ml-2"
                       >
-                        {property.status === 'visited' ? '✓ Visited' : 
+                          {property.status === 'not-visited' ? '⏳ Not Visited' : 
                          property.status === 'interested' ? '✓ Interested' :
+                           property.status === 'visited' ? '✓ Visited' :
                          property.status === 'callback' ? '📞 Callback' :
                          property.status === 'appointment' ? '📅 Appointment' :
                          property.status === 'follow-up' ? '🔄 Follow-up' :
                          property.status === 'not-interested' ? '❌ Not Interested' :
                          '⏳ Not Visited'}
-                      </Badge>
                     </div>
-                    
-                    <div className="text-xs sm:text-sm text-gray-600 space-y-1">
-                      
-                      {property.residents?.map((resident, i) => (
-                        <div key={i} className="flex items-center gap-1">
-                          <Users className="w-3 h-3 flex-shrink-0" />
-                          <span className="truncate xl:whitespace-normal xl:break-words">{resident.name}</span>
-                          {resident.phone && (
-                            <>
-                              <Phone className="w-3 h-3 ml-2 flex-shrink-0" />
-                              <span className="text-xs">{resident.phone}</span>
-                            </>
-                          )}
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Edit 
+                            className="w-3 h-3 text-gray-500 hover:text-gray-700 cursor-pointer" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditProperty(property);
+                            }}
+                          />
                         </div>
-                      ))}
                     </div>
                   </div>
                   
-                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <div 
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: statusColors[property.status] }}
-                    />
-                    {property.lastVisited && (
-                      <div className="text-xs text-gray-400">
-                        {new Date(property.lastVisited).toLocaleDateString()}
+                    <div className="text-xs text-gray-500 truncate">
+                      {property.houseNumber} {property.address.split(',')[0].split(' ').slice(1).join(' ')}
                       </div>
-                    )}
+                  </div>
+                  
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    {/* Removed red dot */}
                   </div>
                 </div>
               </div>
@@ -517,17 +743,17 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
 
           {/* Fixed Status Legend */}
           <div className="p-3 sm:p-4 border-t border-gray-200 bg-gray-50 flex-shrink-0">
-            <h4 className="text-xs sm:text-sm font-medium text-gray-700 mb-2">Status Legend</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
+            <h4 className="text-sm font-medium text-gray-700 mb-2">Status Legend</h4>
+            <div className="grid grid-cols-2 gap-1 text-xs">
               {Object.entries(statusColors).map(([status, color]) => {
                 const displayName = {
-                  'not-visited': '⏳ Not Visited',
-                  'interested': '✓ Interested',
-                  'visited': '✓ Visited',
-                  'callback': '📞 Callback',
-                  'appointment': '📅 Appointment',
-                  'follow-up': '🔄 Follow-up',
-                  'not-interested': '❌ Not Interested'
+                  'not-visited': 'Not Visited',
+                  'interested': 'Interested',
+                  'visited': 'Visited',
+                  'callback': 'Callback',
+                  'appointment': 'Appointment',
+                  'follow-up': 'Follow-up',
+                  'not-interested': 'Not Interested'
                 }[status] || status;
                 
                 return (
@@ -536,7 +762,7 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                       className="w-2 h-2 rounded-full flex-shrink-0" 
                       style={{ backgroundColor: color }}
                     />
-                    <span className="text-gray-600 truncate xl:whitespace-normal xl:break-words">{displayName} ({statusCounts[status as keyof typeof statusCounts]})</span>
+                    <span className="text-gray-600 truncate">{displayName} ({statusCounts[status as keyof typeof statusCounts]})</span>
                   </div>
                 );
               })}
@@ -665,60 +891,419 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
             ))}
 
             {/* Selected Property Info Window */}
-            {selectedProperty && (
-              <div className="absolute bottom-6 left-6 bg-white rounded-lg shadow-lg p-4 min-w-64 z-10">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{selectedProperty.address}</h3>
-                    <p className="text-sm text-gray-600">House #{selectedProperty.houseNumber}</p>
+            {selectedProperty && !isEditModalOpen && (
+              <div className="absolute bottom-6 left-6 bg-white rounded-lg shadow-lg border-2 border-red-500 p-4 min-w-80 z-50">
+           {/* Close Button */}
+           <Button
+             variant="ghost"
+             size="sm"
+             onClick={() => setSelectedProperty(null)}
+             className="absolute top-2 right-2 z-10 h-6 w-6 p-0 rounded-full bg-gray-100 hover:bg-gray-200"
+           >
+             <X className="h-3 w-3" />
+           </Button>
+                {isLoadingPropertyDetails ? (
+                  // Loading State
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
+                      <p className="text-xs text-gray-600">Loading property details...</p>
+                    </div>
                   </div>
-                  <Badge 
-                    variant="secondary"
-                    style={{ 
-                      backgroundColor: statusColors[selectedProperty.status] + '20',
-                      color: statusColors[selectedProperty.status]
-                    }}
-                  >
-                    {selectedProperty.status}
-                  </Badge>
+                ) : detailedProperty ? (
+                  // Property Details Content
+                  <>
+                    {/* Top Section - Header */}
+                    <div className="border-b border-gray-200 pb-3 mb-3">
+                      <div className="flex items-start gap-3">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center">
+                          <CheckCircle className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-900 text-sm leading-tight">
+                            {detailedProperty.resident?.address}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <div className="text-xs font-medium" style={{ 
+                              color: detailedProperty.resident?.status === 'visited' ? '#10B981' :
+                                     detailedProperty.resident?.status === 'not-visited' ? '#EF4444' :
+                                     detailedProperty.resident?.status === 'interested' ? '#F59E0B' :
+                                     detailedProperty.resident?.status === 'callback' ? '#8B5CF6' :
+                                     detailedProperty.resident?.status === 'appointment' ? '#3B82F6' :
+                                     detailedProperty.resident?.status === 'follow-up' ? '#EC4899' :
+                                     detailedProperty.resident?.status === 'not-interested' ? '#6B7280' : '#EF4444'
+                            }}>
+                              {detailedProperty.resident?.status === 'visited' ? 'Visited' :
+                               detailedProperty.resident?.status === 'not-visited' ? 'Not Visited' :
+                               detailedProperty.resident?.status === 'interested' ? 'Interested' :
+                               detailedProperty.resident?.status === 'callback' ? 'Callback' :
+                               detailedProperty.resident?.status === 'appointment' ? 'Appointment' :
+                               detailedProperty.resident?.status === 'follow-up' ? 'Follow-up' :
+                               detailedProperty.resident?.status === 'not-interested' ? 'Not Interested' :
+                               'Not Visited'}
+                            </div>
+                          </div>
+                        </div>
                 </div>
                 
-                {selectedProperty.residents?.map((resident, index) => (
-                  <div key={index} className="space-y-1 mb-3">
-                    <div className="flex items-center gap-2">
-                      <Users className="w-4 h-4 text-gray-400" />
-                      <span className="text-sm font-medium">{resident.name}</span>
+                                            {/* Property Details Row - Only show when data exists */}
+                      {/* Removed property age, occupancy, and score information as they're not collected in the form */}
                     </div>
-                    {resident.phone && (
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Phone className="w-4 h-4 text-gray-400" />
-                        <span>{resident.phone}</span>
-                      </div>
-                    )}
-                  </div>
-                ))}
-                
-                {selectedProperty.lastVisited && (
-                  <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
-                    <Calendar className="w-4 h-4 text-gray-400" />
-                    <span>Last visited: {new Date(selectedProperty.lastVisited).toLocaleDateString()}</span>
+
+                    {/* Main Content Card */}
+                    <div className="bg-gray-50 rounded p-3 mb-3">
+                                       <h4 className="font-semibold text-gray-900 text-xs mb-2">
+                   Contact Information
+                 </h4>
+                      
+                                       {/* Contact Information */}
+                 {detailedProperty.resident?.phone && (
+                   <div className="flex items-center gap-2 mb-2">
+                     <Phone className="w-2.5 h-2.5 text-red-500" />
+                     <span className="text-blue-600 font-medium text-xs">{detailedProperty.resident.phone}</span>
                   </div>
                 )}
                 
-                <div className="flex gap-2">
-                  <Button size="sm" className="flex-1">
-                    <Eye className="w-4 h-4 mr-2" />
-                    View Details
+                      {/* Property Data Information */}
+                      {detailedProperty.propertyData && (
+                        <div className="mb-2">
+                                               {detailedProperty.propertyData.ownerPhone && (
+                       <div className="flex items-center gap-2 mb-1">
+                         <Phone className="w-2.5 h-2.5 text-red-500" />
+                         <span className="text-blue-600 font-medium text-xs">Owner: {detailedProperty.propertyData.ownerPhone}</span>
+                       </div>
+                     )}
+                        </div>
+                      )}
+
+                      {/* Zone Information */}
+                      {detailedProperty.zone && (
+                        <div className="mb-2">
+                                               <div className="flex items-center gap-2 mb-1">
+                       <MapPin className="w-2.5 h-2.5 text-blue-500" />
+                       <span className="text-blue-600 font-medium text-xs">Zone: {detailedProperty.zone.name}</span>
+                     </div>
+                     {detailedProperty.zoneStats && (
+                       <div className="flex items-center gap-2 mb-1">
+                         <Users className="w-2.5 h-2.5 text-green-500" />
+                         <span className="text-green-600 font-medium text-xs">Progress: {detailedProperty.zoneStats.visitedResidents}/{detailedProperty.zoneStats.totalResidents} visited</span>
+                       </div>
+                     )}
+                        </div>
+                      )}
+
+                      {/* Resident Details Tags */}
+                      <div className="flex flex-wrap gap-1">
+                        {detailedProperty.resident?.houseNumber && (
+                          <div className="text-xs text-gray-700 px-1 py-0">
+                            House #{detailedProperty.resident.houseNumber}
+                          </div>
+                        )}
+
+                        {detailedProperty.resident?.email && (
+                          <div className="text-xs text-gray-700 px-1 py-0">
+                            {detailedProperty.resident.email}
+                          </div>
+                        )}
+                        {detailedProperty.resident?.lastVisited && (
+                          <div className="text-xs text-gray-700 px-1 py-0">
+                            Last: {new Date(detailedProperty.resident.lastVisited).toLocaleDateString()}
+                          </div>
+                        )}
+                        {detailedProperty.resident?.assignedAgentId && (
+                          <div className="text-xs text-gray-700 px-1 py-0">
+                            Assigned: {(detailedProperty.resident.assignedAgentId as any)?.name}
+                          </div>
+                        )}
+                        
+                        {/* Property Data Tags - Only show owner information that's collected in the form */}
+                        {detailedProperty.propertyData?.ownerName && (
+                          <div className="text-xs text-gray-700 px-1 py-0">
+                            Owner: {detailedProperty.propertyData.ownerName}
+                          </div>
+                        )}
+                        {/* Only show these if we have actual data, not static values */}
+                        {/* Removed static "Homeowner" and "Office worker" tags */}
+                      </div>
+
+
+                    </div>
+
+                    {/* Export Button */}
+                    <div className="flex justify-end">
+                      <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white text-xs">
+                        <Download className="w-3 h-3 mr-1" />
+                        Export CSV
                   </Button>
-                  <Button variant="outline" size="sm">
-                    <MoreHorizontal className="w-4 h-4" />
+                    </div>
+                  </>
+                ) : (
+                  // Error State
+                  <div className="flex items-center justify-center py-8">
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-xs text-red-600">Failed to load property details</p>
+                      <Button size="sm" variant="outline" onClick={() => fetchPropertyDetails(selectedProperty._id)}>
+                        Retry
                   </Button>
                 </div>
+                  </div>
+                )}
               </div>
             )}
           </GoogleMap>
         </div>
       </div>
+
+      {/* Property Detail Modal */}
+      <PropertyDetailModal
+        isOpen={isDetailModalOpen && !isEditModalOpen}
+        onClose={handleCloseDetailModal}
+        property={selectedProperty}
+        detailedProperty={detailedProperty}
+        isLoading={isLoadingPropertyDetails}
+        onExport={handleExportProperty}
+      />
+
+      {/* Edit Property Modal */}
+      {isEditModalOpen && selectedProperty && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-lg">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Edit Property</h2>
+                <button
+                  onClick={handleCloseEditModal}
+                  className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Form Content */}
+            <div className="p-6 space-y-6">
+              {/* Basic Information Section */}
+              <div className="space-y-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">Basic Information</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Address *</label>
+                    <input
+                      type="text"
+                      value={editFormData.address}
+                      onChange={(e) => handleFormChange('address', e.target.value)}
+                      disabled={isUpdatingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter full property address"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">House Number</label>
+                    <input
+                      type="number"
+                      value={editFormData.houseNumber}
+                      onChange={(e) => handleFormChange('houseNumber', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter house number"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Longitude *</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={editFormData.longitude}
+                      onChange={(e) => handleFormChange('longitude', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter longitude"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Latitude *</label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={editFormData.latitude}
+                      onChange={(e) => handleFormChange('latitude', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter latitude"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Status & Tracking Section */}
+              <div className="space-y-4 bg-green-50 p-4 rounded-lg border border-green-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-green-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">Status & Tracking</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Status *</label>
+                    <select
+                      value={editFormData.status}
+                      onChange={(e) => handleFormChange('status', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="not-visited">Not Visited</option>
+                      <option value="interested">Interested</option>
+                      <option value="visited">Visited</option>
+                      <option value="callback">Callback</option>
+                      <option value="appointment">Appointment</option>
+                      <option value="follow-up">Follow-up</option>
+                      <option value="not-interested">Not Interested</option>
+                    </select>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Last Visited</label>
+                    <input
+                      type="date"
+                      value={editFormData.lastVisited}
+                      onChange={(e) => handleFormChange('lastVisited', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Notes</label>
+                  <textarea
+                    rows={3}
+                    value={editFormData.notes}
+                    onChange={(e) => handleFormChange('notes', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    placeholder="Enter agent notes about the visit/interaction..."
+                  ></textarea>
+                </div>
+              </div>
+
+              {/* Contact Information Section */}
+              <div className="space-y-4 bg-purple-50 p-4 rounded-lg border border-purple-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-purple-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">Contact Information</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Phone</label>
+                    <input
+                      type="tel"
+                      value={editFormData.phone}
+                      onChange={(e) => handleFormChange('phone', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter phone number"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Email</label>
+                    <input
+                      type="email"
+                      value={editFormData.email}
+                      onChange={(e) => handleFormChange('email', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter email address"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Owner Information Section */}
+              <div className="space-y-4 bg-orange-50 p-4 rounded-lg border border-orange-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">Owner Information</h3>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Owner Name</label>
+                    <input
+                      type="text"
+                      value={editFormData.ownerName}
+                      onChange={(e) => handleFormChange('ownerName', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter owner name"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Owner Phone</label>
+                    <input
+                      type="tel"
+                      value={editFormData.ownerPhone}
+                      onChange={(e) => handleFormChange('ownerPhone', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter owner phone"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Owner Email</label>
+                    <input
+                      type="email"
+                      value={editFormData.ownerEmail}
+                      onChange={(e) => handleFormChange('ownerEmail', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter owner email"
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Owner Mailing Address</label>
+                    <input
+                      type="text"
+                      value={editFormData.ownerMailingAddress}
+                      onChange={(e) => handleFormChange('ownerMailingAddress', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Enter owner mailing address"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-lg">
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={handleCloseEditModal}
+                  disabled={isUpdatingResident}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUpdateResident}
+                  disabled={isUpdatingResident}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isUpdatingResident && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  )}
+                  {isUpdatingResident ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

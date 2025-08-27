@@ -142,7 +142,16 @@ export function TeamMembersTable() {
 
   const { data: teams = [], isLoading, error, refetch } = useQuery({
     queryKey: ['teams'],
-    queryFn: fetchTeams
+    queryFn: fetchTeams,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error: any) => {
+      if (error?.response?.status === 429) {
+        return false;
+      }
+      return failureCount < 2;
+    }
   })
 
   const deleteTeamMutation = useMutation({
