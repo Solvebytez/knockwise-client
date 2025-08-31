@@ -83,6 +83,10 @@ export function ManuallyAssignTerritoryModal({
   const [detectedResidents, setDetectedResidents] = useState<DetectedResident[]>([])
   const [generatedPolygon, setGeneratedPolygon] = useState<any>(null)
   const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false)
+  const [territoryArea, setTerritoryArea] = useState<number>(0)
+  const [buildingDensity, setBuildingDensity] = useState<number>(0)
+  const [detectionProgress, setDetectionProgress] = useState<string>('')
+  const [apiCallCount, setApiCallCount] = useState<number>(0)
 
   // Google Places services
   const [autocompleteService, setAutocompleteService] = useState<any>(null)
@@ -720,12 +724,21 @@ export function ManuallyAssignTerritoryModal({
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
-      if (!target.closest('.relative')) {
+      // Check if click is outside any dropdown container
+      const isOutsideCityDropdown = !target.closest('[data-dropdown="city"]')
+      const isOutsideNeighbourhoodDropdown = !target.closest('[data-dropdown="neighbourhood"]')
+      const isOutsideStreetDropdown = !target.closest('[data-dropdown="street"]')
+      
+      if (isOutsideCityDropdown) {
         setShowCitySuggestions(false)
-        setShowNeighbourhoodSuggestions(false)
-        setShowStreetSuggestions(false)
-        setShowResultsPanel(false)
       }
+      if (isOutsideNeighbourhoodDropdown) {
+        setShowNeighbourhoodSuggestions(false)
+      }
+      if (isOutsideStreetDropdown) {
+        setShowStreetSuggestions(false)
+      }
+      setShowResultsPanel(false)
     }
 
     document.addEventListener('mousedown', handleClickOutside)
@@ -811,123 +824,155 @@ export function ManuallyAssignTerritoryModal({
     setSelectedStreets(prev => prev.filter(id => id !== placeId))
   }
 
-  // Detect residents when streets are selected
+  // Enhanced resident detection with multi-source approach
   const detectResidentsFromStreets = useCallback(async () => {
     if (selectedStreets.length === 0 || !placesService) return
 
     setIsDetectingResidents(true)
     setDetectedResidents([])
+    toast.info('🚀 Starting enhanced resident detection...')
 
     try {
       const allResidents: DetectedResident[] = []
       const streetCoordinates: [number, number][] = []
 
-      // Get coordinates for each selected street
-      for (const streetId of selectedStreets) {
-        const request = {
-          placeId: streetId,
-          fields: ['geometry', 'formatted_address', 'name']
-        }
+      console.log('🔍 Starting enhanced detection for', selectedStreets.length, 'streets')
 
-        try {
-          const result = await new Promise<any>((resolve, reject) => {
-            placesService.getDetails(request, (result: any, status: any) => {
-              if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
-                resolve(result)
-              } else {
-                reject(new Error(`Place details failed: ${status}`))
-              }
-            })
-          })
+             // STEP 1: Collect all street coordinates FIRST
+       for (const streetId of selectedStreets) {
+         console.log(`📍 Collecting coordinates for street ID: ${streetId}`)
+         
+         if (streetId.startsWith('osm_way_')) {
+           // Use OSM API for OSM streets
+           try {
+             const streetInfo = await getOsmStreetInfo(streetId)
+             streetCoordinates.push([streetInfo.lat, streetInfo.lon])
+             console.log('✅ OSM street coordinates collected:', streetInfo.lat, streetInfo.lon)
+           } catch (error) {
+             console.error('❌ OSM street coordinates failed:', error)
+           }
+         } else {
+           // Use Google Places API for Google streets
+           try {
+             const request = {
+               placeId: streetId,
+               fields: ['geometry']
+             }
 
-          const location = result.geometry.location
-          streetCoordinates.push([location.lat(), location.lng()])
+             const result = await new Promise<any>((resolve, reject) => {
+               placesService.getDetails(request, (result: any, status: any) => {
+                 if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
+                   resolve(result)
+                 } else {
+                   reject(new Error(`Place details failed: ${status}`))
+                 }
+               })
+             })
 
-          // Get street name
-          const streetName = result.name || result.formatted_address.split(',')[0]
-          console.log(`Processing street: ${streetName}`)
+             const location = result.geometry.location
+             streetCoordinates.push([location.lat(), location.lng()])
+             console.log('✅ Google Places street coordinates collected:', location.lat(), location.lng())
+           } catch (error) {
+             console.error('❌ Google Places street coordinates failed:', error)
+           }
+         }
+       }
 
-          // Use nearby search to find actual buildings on this street
-          const nearbySearchRequest = {
-            location: { lat: location.lat(), lng: location.lng() },
-            radius: 500, // 500 meters radius
-            type: 'establishment',
-            keyword: streetName
-          }
+       // STEP 2: Generate enhanced polygon from collected coordinates
+       let enhancedPolygon: any = null
+       if (streetCoordinates.length > 0) {
+         enhancedPolygon = generateEnhancedPolygon(streetCoordinates)
+         setGeneratedPolygon(enhancedPolygon)
+         console.log('🗺️ Enhanced polygon generated for geospatial validation')
+       }
 
-          try {
-            const buildings = await new Promise<any[]>((resolve, reject) => {
-              const service = new window.google.maps.places.PlacesService(document.createElement('div'))
-              service.nearbySearch(nearbySearchRequest, (results, status) => {
-                if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
-                  resolve(results)
-                } else {
-                  resolve([])
-                }
-              })
-            })
+       // STEP 3: Now process each selected street with enhanced detection (with polygon available)
+       for (const streetId of selectedStreets) {
+         console.log(`📍 Processing street ID: ${streetId}`)
+         
+         // Dual data source support
+         let streetInfo: any = null
+         let streetName = ''
+         
+         if (streetId.startsWith('osm_way_')) {
+           // Use OSM API for OSM streets
+           console.log('🗺️ Using OSM API for street:', streetId)
+           try {
+             streetInfo = await getOsmStreetInfo(streetId)
+             streetName = streetInfo.name
+             console.log('✅ OSM street info retrieved:', streetName)
+           } catch (error) {
+             console.error('❌ OSM street info failed:', error)
+             continue
+           }
+         } else {
+           // Use Google Places API for Google streets
+           console.log('🌐 Using Google Places API for street:', streetId)
+           try {
+             const request = {
+               placeId: streetId,
+               fields: ['geometry', 'formatted_address', 'name', 'address_components']
+             }
 
-            // Process found buildings and extract real building numbers
-            buildings.forEach((building, index) => {
-              const buildingLocation = building.geometry.location
-              const buildingNumber = extractBuildingNumber(building.name || building.formatted_address)
-              
-              if (buildingNumber > 0) {
-                allResidents.push({
-                  id: `resident-${streetId}-${building.place_id}`,
-                  name: building.name || `Resident ${buildingNumber}`,
-                  address: building.formatted_address || `${buildingNumber} ${streetName}`,
-                  buildingNumber: buildingNumber,
-                  lat: buildingLocation.lat(),
-                  lng: buildingLocation.lng(),
-                  status: 'not-visited',
-                  phone: building.formatted_phone_number || '',
-                  email: '',
-                  notes: '',
-                  lastVisited: null,
-                  createdAt: new Date(),
-                  updatedAt: new Date()
-                })
-                console.log(`Found real building: ${buildingNumber} at ${building.formatted_address}`)
-              }
-            })
+             const result = await new Promise<any>((resolve, reject) => {
+               placesService.getDetails(request, (result: any, status: any) => {
+                 if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
+                   resolve(result)
+                 } else {
+                   reject(new Error(`Place details failed: ${status}`))
+                 }
+               })
+             })
 
-            console.log(`Found ${buildings.length} buildings on ${streetName}`)
-          } catch (error) {
-            console.error('Error searching for buildings:', error)
-          }
-        } catch (error) {
-          console.error('Error getting street details:', error)
-        }
+             streetInfo = result
+             streetName = result.name || result.formatted_address.split(',')[0]
+             console.log('✅ Google Places street info retrieved:', streetName)
+           } catch (error) {
+             console.error('❌ Google Places street info failed:', error)
+             continue
+           }
+         }
+
+         // Enhanced building detection with multiple approaches (now with geospatial validation)
+         const streetResidents = await searchResidentialBuildings(streetInfo, streetName, enhancedPolygon)
+         const reverseGeocodeResidents = await reverseGeocodeResidentialBuildings(streetInfo, streetName, enhancedPolygon)
+        
+        // Combine and deduplicate residents
+        const combinedResidents = [...streetResidents, ...reverseGeocodeResidents]
+        const uniqueResidents = deduplicateResidents(combinedResidents)
+        
+        // Apply sequential number detection
+        const sequentialResidents = await detectSequentialHouseNumbers(uniqueResidents, streetName)
+        
+        allResidents.push(...sequentialResidents)
+        
+        console.log(`✅ Street "${streetName}" processed: ${sequentialResidents.length} residents found`)
+        toast.success(`Found ${sequentialResidents.length} residents on ${streetName}`)
       }
 
-      // Generate a polygon around the streets
-      if (streetCoordinates.length > 0) {
-        const bounds = new window.google.maps.LatLngBounds()
-        streetCoordinates.forEach(([lat, lng]) => {
-          bounds.extend(new window.google.maps.LatLng(lat, lng))
-        })
+      
 
-        // Create a rectangular polygon around the streets
-        const ne = bounds.getNorthEast()
-        const sw = bounds.getSouthWest()
-        const padding = 0.001 // Small padding around the streets
-
-        const polygonCoords = [
-          { lat: ne.lat() + padding, lng: sw.lng() - padding },
-          { lat: ne.lat() + padding, lng: ne.lng() + padding },
-          { lat: sw.lat() - padding, lng: ne.lng() + padding },
-          { lat: sw.lat() - padding, lng: sw.lng() - padding },
-        ]
-
-        setGeneratedPolygon(polygonCoords)
-      }
-
-      setDetectedResidents(allResidents)
-      console.log(`Detected ${allResidents.length} residents from ${selectedStreets.length} streets`)
+       // Calculate area and density
+       const area = calculateTerritoryArea(enhancedPolygon || [])
+       const density = allResidents.length / (area || 1)
+       
+       setTerritoryArea(area)
+       setBuildingDensity(density)
+       setDetectedResidents(allResidents)
+       
+       console.log(`🎉 Enhanced detection completed: ${allResidents.length} residents from ${selectedStreets.length} streets`)
+       console.log(`📊 Territory stats: Area: ${area.toFixed(2)} ha, Density: ${density.toFixed(1)} buildings/ha`)
+       console.log(`📊 API Call Statistics: ${apiCallCount} total API calls made`)
+       
+       // Enhanced success toast with detailed stats
+       toast.success(`✅ Enhanced detection complete! Found ${allResidents.length} residents across ${selectedStreets.length} streets. Area: ${area.toFixed(2)} ha, Density: ${density.toFixed(1)} buildings/ha`)
+       
+       // API call statistics
+       toast.info(`📊 Detection used ${apiCallCount} API calls across multiple data sources`)
+      
     } catch (error) {
-      console.error('Error detecting residents:', error)
-      toast.error('Error detecting residents')
+      console.error('❌ Enhanced detection failed:', error)
+      toast.error('Error during enhanced resident detection')
     } finally {
       setIsDetectingResidents(false)
     }
@@ -996,14 +1041,673 @@ export function ManuallyAssignTerritoryModal({
     return extractBuildingNumber(formattedAddress)
   }
 
+  // Enhanced helper functions for advanced detection
+
+  // Get OSM street information
+  const getOsmStreetInfo = async (streetId: string) => {
+    console.log('🗺️ Fetching OSM street info for:', streetId)
+    setApiCallCount(prev => prev + 1)
+    setDetectionProgress('Fetching OSM street data...')
+    try {
+      const wayId = streetId.replace('osm_way_', '')
+      const response = await fetch(`https://nominatim.openstreetmap.org/lookup?osm_ids=W${wayId}&format=json&addressdetails=1`)
+      const data = await response.json()
+      
+      if (data && data.length > 0) {
+        const street = data[0]
+        return {
+          name: street.display_name.split(',')[0],
+          lat: parseFloat(street.lat),
+          lon: parseFloat(street.lon),
+          address: street.display_name
+        }
+      }
+      throw new Error('No OSM data found')
+    } catch (error) {
+      console.error('❌ OSM street info failed:', error)
+      throw error
+    }
+  }
+
+  // Enhanced residential building search
+  const searchResidentialBuildings = async (streetInfo: any, streetName: string, territoryPolygon?: any): Promise<DetectedResident[]> => {
+    console.log('🏠 Starting enhanced residential building search for:', streetName)
+    setDetectionProgress(`Searching residential buildings on ${streetName}...`)
+    const residents: DetectedResident[] = []
+    
+    try {
+      const center = streetInfo.geometry?.location || { lat: streetInfo.lat, lng: streetInfo.lon }
+      const searchQueries = [
+        'residential buildings',
+        'houses',
+        'apartments',
+        'homes',
+        'condos',
+        'townhouses',
+        'residential units'
+      ]
+      
+      for (const query of searchQueries) {
+        try {
+          const nearbySearchRequest = {
+            location: center,
+            radius: 500, // Increased from 300m to 500m for better coverage
+            type: 'establishment',
+            keyword: query
+          }
+
+          setApiCallCount(prev => prev + 1)
+          const buildings = await new Promise<any[]>((resolve, reject) => {
+            const service = new window.google.maps.places.PlacesService(document.createElement('div'))
+            service.nearbySearch(nearbySearchRequest, (results, status) => {
+              if (status === window.google.maps.places.PlacesServiceStatus.OK && results) {
+                resolve(results)
+              } else {
+                resolve([])
+              }
+            })
+          })
+
+          // Process buildings with enhanced filtering
+          buildings.forEach((building) => {
+            const buildingLocation = building.geometry.location
+            const buildingNumber = extractBuildingNumber(building.name || building.formatted_address)
+            
+                         // Enhanced validation with geospatial check
+             if (buildingNumber > 0 && isResidentialAddress(
+               { lat: buildingLocation.lat(), lng: buildingLocation.lng() }, 
+               territoryPolygon || []
+             )) {
+              residents.push({
+                id: `resident-${Date.now()}-${building.place_id}`,
+                name: building.name || `Resident ${buildingNumber}`,
+                address: building.formatted_address || `${buildingNumber} ${streetName}`,
+                buildingNumber: buildingNumber,
+                lat: buildingLocation.lat(),
+                lng: buildingLocation.lng(),
+                status: 'not-visited',
+                phone: building.formatted_phone_number || '',
+                email: '',
+                notes: '',
+                lastVisited: null,
+                createdAt: new Date(),
+                updatedAt: new Date()
+              })
+              console.log(`🏠 Found residential building: ${buildingNumber} at ${building.formatted_address}`)
+            }
+          })
+
+          console.log(`✅ Query "${query}" found ${buildings.length} buildings`)
+          
+          // Small delay to respect rate limits
+          await new Promise(resolve => setTimeout(resolve, 200))
+          
+        } catch (error) {
+          console.error(`❌ Query "${query}" failed:`, error)
+        }
+      }
+      
+      // Fallback: Try searching for specific house numbers on the street
+      if (residents.length === 0) {
+        console.log('🔄 No buildings found, trying house number search...')
+        const houseNumbers = await searchForHouseNumbers(streetInfo, streetName)
+        residents.push(...houseNumbers)
+      }
+      
+      console.log(`🎯 Enhanced search completed: ${residents.length} residential buildings found`)
+      return residents
+      
+    } catch (error) {
+      console.error('❌ Enhanced residential search failed:', error)
+      return []
+    }
+  }
+
+  // Reverse geocoding for residential buildings
+  const reverseGeocodeResidentialBuildings = async (streetInfo: any, streetName: string, territoryPolygon?: any): Promise<DetectedResident[]> => {
+    console.log('🔄 Starting reverse geocoding for:', streetName)
+    setDetectionProgress(`Reverse geocoding addresses on ${streetName}...`)
+    const residents: DetectedResident[] = []
+    
+    try {
+      const center = streetInfo.geometry?.location || { lat: streetInfo.lat, lng: streetInfo.lon }
+      const searchPoints = 8 // Reduced for more focused search
+      
+      // Generate search points along street path with better spacing
+      for (let i = 0; i < searchPoints; i++) {
+        try {
+          // Create more structured search points along the street
+          const angle = (i / searchPoints) * Math.PI * 2
+          const radius = 0.0005 // Smaller radius for more precise search
+          const point = {
+            lat: center.lat + Math.cos(angle) * radius,
+            lng: center.lng + Math.sin(angle) * radius
+          }
+          
+          setApiCallCount(prev => prev + 1)
+          const geocoder = new window.google.maps.Geocoder()
+          
+          // Use more specific geocoding request
+          const results = await new Promise<any[]>((resolve, reject) => {
+            geocoder.geocode({
+              location: point
+            }, (results, status) => {
+              if (status === window.google.maps.GeocoderStatus.OK && results) {
+                resolve(results)
+              } else {
+                resolve([])
+              }
+            })
+          })
+
+          // Process geocoding results with better filtering
+          results.forEach((result) => {
+            const address = result.formatted_address
+            const types = result.types || []
+            
+            // Only process if it's a street address or premise
+            if (types.includes('street_address') || types.includes('premise') || types.includes('subpremise')) {
+              const buildingNumber = extractBuildingNumberFromAddressValidation(result)
+              
+              if (buildingNumber > 0 && isResidentialAddress(
+                { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() }, 
+                territoryPolygon || []
+              )) {
+                const location = result.geometry.location
+                residents.push({
+                  id: `resident-geocode-${Date.now()}-${buildingNumber}`,
+                  name: `Resident ${buildingNumber}`,
+                  address: address,
+                  buildingNumber: buildingNumber,
+                  lat: location.lat(),
+                  lng: location.lng(),
+                  status: 'not-visited',
+                  phone: '',
+                  email: '',
+                  notes: '',
+                  lastVisited: null,
+                  createdAt: new Date(),
+                  updatedAt: new Date()
+                })
+                console.log(`🔄 Found via geocoding: ${buildingNumber} at ${address}`)
+              }
+            }
+          })
+          
+          // Small delay between requests
+          await new Promise(resolve => setTimeout(resolve, 150))
+          
+        } catch (error) {
+          console.error(`❌ Geocoding point ${i} failed:`, error)
+        }
+      }
+      
+      console.log(`🔄 Reverse geocoding completed: ${residents.length} buildings found`)
+      return residents
+      
+    } catch (error) {
+      console.error('❌ Reverse geocoding failed:', error)
+      return []
+    }
+  }
+
+  // Deduplicate residents
+  const deduplicateResidents = (residents: DetectedResident[]): DetectedResident[] => {
+    console.log('🔄 Deduplicating residents...')
+    const uniqueResidents = residents.filter((resident, index, self) => 
+      index === self.findIndex(r => 
+        r.address.toLowerCase() === resident.address.toLowerCase() ||
+        (r.lat === resident.lat && r.lng === resident.lng)
+      )
+    )
+    console.log(`🔄 Deduplication: ${residents.length} → ${uniqueResidents.length} residents`)
+    return uniqueResidents
+  }
+
+  // Sequential house number detection
+  const detectSequentialHouseNumbers = async (residents: DetectedResident[], streetName: string): Promise<DetectedResident[]> => {
+    console.log('🔢 Starting sequential house number detection for:', streetName)
+    
+    if (residents.length < 2) {
+      console.log('⚠️ Not enough residents for pattern analysis')
+      return residents
+    }
+    
+    try {
+      // Analyze existing patterns
+      const patterns = analyzeHouseNumberPatterns(residents)
+      console.log('📊 House number patterns:', patterns)
+      
+      // Generate missing numbers
+      const missingNumbers = generateMissingHouseNumbers(residents, patterns, streetName)
+      console.log(`🔢 Generated ${missingNumbers.length} missing house numbers`)
+      
+      // Create residents for missing numbers
+      const generatedResidents = missingNumbers.map(number => 
+        estimateBuildingPosition(number, residents, patterns, streetName)
+      )
+      
+      const allResidents = [...residents, ...generatedResidents]
+      console.log(`🔢 Sequential detection complete: ${allResidents.length} total residents`)
+      
+      return allResidents
+      
+    } catch (error) {
+      console.error('❌ Sequential detection failed:', error)
+      return residents
+    }
+  }
+
+  // Analyze house number patterns
+  const analyzeHouseNumberPatterns = (residents: DetectedResident[]) => {
+    const sortedNumbers = residents
+      .map(r => r.buildingNumber)
+      .filter((n): n is number => n !== undefined && n > 0)
+      .sort((a, b) => a - b)
+    
+    if (sortedNumbers.length < 2) return null
+    
+    console.log('🔢 Analyzing house number patterns for:', sortedNumbers)
+    
+    const differences = []
+    for (let i = 1; i < sortedNumbers.length; i++) {
+      differences.push(sortedNumbers[i] - sortedNumbers[i - 1])
+    }
+    
+    console.log('🔢 Differences between consecutive numbers:', differences)
+    
+    // Find the most common difference (mode) instead of average
+    const differenceCounts = differences.reduce((acc, diff) => {
+      acc[diff] = (acc[diff] || 0) + 1
+      return acc
+    }, {} as Record<number, number>)
+    
+    const mostCommonDifference = Object.entries(differenceCounts)
+      .sort(([,a], [,b]) => b - a)[0][0]
+    
+    const step = parseInt(mostCommonDifference, 10)
+    
+    // Check for odd/even patterns
+    const oddNumbers = sortedNumbers.filter(n => n % 2 === 1)
+    const evenNumbers = sortedNumbers.filter(n => n % 2 === 0)
+    const hasOddEven = oddNumbers.length > 0 && evenNumbers.length > 0
+    
+    // If we have both odd and even, the step might be 2
+    const refinedStep = hasOddEven && step > 2 ? 2 : step
+    
+    console.log('🔢 Pattern analysis results:', {
+      differences,
+      differenceCounts,
+      mostCommonDifference,
+      step,
+      refinedStep,
+      hasOddEven,
+      oddNumbers: oddNumbers.length,
+      evenNumbers: evenNumbers.length
+    })
+    
+    return {
+      min: Math.min(...sortedNumbers),
+      max: Math.max(...sortedNumbers),
+      step: refinedStep || 2,
+      hasOddEven,
+      sortedNumbers,
+      differences,
+      oddNumbers,
+      evenNumbers
+    }
+  }
+
+  // Generate missing house numbers
+  const generateMissingHouseNumbers = (residents: DetectedResident[], patterns: any, streetName: string): number[] => {
+    if (!patterns) return []
+    
+    const generated: number[] = []
+    const extendRange = 50 // Increased from 20 to 50 numbers in each direction
+    const maxGenerated = Math.min(200, Math.floor(residents.length * 3)) // Increased from 100 to 200
+    
+    console.log('🔢 Generating missing house numbers with patterns:', {
+      min: patterns.min,
+      max: patterns.max,
+      step: patterns.step,
+      hasOddEven: patterns.hasOddEven,
+      extendRange,
+      maxGenerated
+    })
+    
+    // Handle odd/even patterns more intelligently
+    if (patterns.hasOddEven && patterns.step === 2) {
+      console.log('🔢 Detected odd/even pattern, generating numbers with step 2')
+      
+      // Generate odd numbers before minimum
+      for (let i = patterns.min - extendRange; i < patterns.min; i += 2) {
+        if (generated.length >= maxGenerated) break
+        if (i > 0 && i % 2 === 1 && !patterns.sortedNumbers.includes(i)) {
+          generated.push(i)
+        }
+      }
+      
+      // Generate even numbers before minimum
+      for (let i = patterns.min - extendRange + 1; i < patterns.min; i += 2) {
+        if (generated.length >= maxGenerated) break
+        if (i > 0 && i % 2 === 0 && !patterns.sortedNumbers.includes(i)) {
+          generated.push(i)
+        }
+      }
+      
+      // Generate odd numbers after maximum
+      for (let i = patterns.max + 2; i <= patterns.max + extendRange; i += 2) {
+        if (generated.length >= maxGenerated) break
+        if (i % 2 === 1 && !patterns.sortedNumbers.includes(i)) {
+          generated.push(i)
+        }
+      }
+      
+      // Generate even numbers after maximum
+      for (let i = patterns.max + 1; i <= patterns.max + extendRange; i += 2) {
+        if (generated.length >= maxGenerated) break
+        if (i % 2 === 0 && !patterns.sortedNumbers.includes(i)) {
+          generated.push(i)
+        }
+      }
+    } else {
+      console.log('🔢 Using standard step pattern:', patterns.step)
+      
+      // Generate missing numbers before the minimum
+      for (let i = patterns.min - extendRange; i < patterns.min; i += patterns.step) {
+        if (generated.length >= maxGenerated) break
+        if (i > 0 && !patterns.sortedNumbers.includes(i)) {
+          generated.push(i)
+        }
+      }
+      
+      // Generate missing numbers after the maximum
+      for (let i = patterns.max + patterns.step; i <= patterns.max + extendRange; i += patterns.step) {
+        if (generated.length >= maxGenerated) break
+        if (!patterns.sortedNumbers.includes(i)) {
+          generated.push(i)
+        }
+      }
+    }
+    
+    console.log('🔢 Generated missing house numbers:', generated.length, 'numbers')
+    return generated
+  }
+
+  // Estimate building position for generated numbers
+  const estimateBuildingPosition = (number: number, residents: DetectedResident[], patterns: any, streetName: string): DetectedResident => {
+    // Find the closest existing resident to estimate position
+    const closestResident = residents.reduce((closest, resident) => {
+      const closestDiff = Math.abs((closest.buildingNumber || 0) - number)
+      const currentDiff = Math.abs((resident.buildingNumber || 0) - number)
+      return currentDiff < closestDiff ? resident : closest
+    })
+    
+    // Estimate position based on number difference
+    const numberDiff = number - (closestResident.buildingNumber || 0)
+    const estimatedLat = closestResident.lat + (numberDiff * 0.0001)
+    const estimatedLng = closestResident.lng + (numberDiff * 0.0001)
+    
+    return {
+      id: `resident-generated-${number}`,
+      name: `Resident ${number}`,
+      address: `${number} ${streetName}`,
+      buildingNumber: number,
+      lat: estimatedLat,
+      lng: estimatedLng,
+      status: 'not-visited',
+      phone: '',
+      email: '',
+      notes: 'Generated from pattern analysis',
+      lastVisited: null,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    }
+  }
+
+  // Generate enhanced polygon
+  const generateEnhancedPolygon = (streetCoordinates: [number, number][]) => {
+    if (streetCoordinates.length === 0) {
+      console.log('⚠️ No street coordinates provided for polygon generation')
+      return []
+    }
+    
+    console.log('🗺️ Generating polygon from', streetCoordinates.length, 'street coordinates')
+    
+    const bounds = new window.google.maps.LatLngBounds()
+    streetCoordinates.forEach(([lat, lng]) => {
+      bounds.extend(new window.google.maps.LatLng(lat, lng))
+    })
+
+    const ne = bounds.getNorthEast()
+    const sw = bounds.getSouthWest()
+    const padding = 0.005 // Increased padding for better coverage
+
+    const polygon = [
+      { lat: ne.lat() + padding, lng: sw.lng() - padding },
+      { lat: ne.lat() + padding, lng: ne.lng() + padding },
+      { lat: sw.lat() - padding, lng: ne.lng() + padding },
+      { lat: sw.lat() - padding, lng: sw.lng() - padding },
+    ]
+    
+    console.log('🗺️ Generated polygon with', polygon.length, 'coordinates:', polygon)
+    return polygon
+  }
+
+  // Calculate territory area
+  const calculateTerritoryArea = (polygonCoords: { lat: number, lng: number }[]): number => {
+    if (!polygonCoords || polygonCoords.length < 3) {
+      console.log('⚠️ Not enough polygon coordinates for area calculation:', polygonCoords?.length || 0)
+      return 0
+    }
+    
+    console.log('📊 Calculating area for polygon with', polygonCoords.length, 'coordinates')
+    console.log('📊 Polygon coordinates:', polygonCoords)
+    
+    try {
+      // Check if Google Maps Geometry Library is available
+      if (window.google?.maps?.geometry?.spherical?.computeArea) {
+        console.log('✅ Using Google Maps Geometry Library for area calculation')
+        
+        // Ensure polygon is closed (first and last points should be the same)
+        let closedCoords = [...polygonCoords]
+        if (closedCoords.length > 0) {
+          const first = closedCoords[0]
+          const last = closedCoords[closedCoords.length - 1]
+          if (first.lat !== last.lat || first.lng !== last.lng) {
+            closedCoords.push({ lat: first.lat, lng: first.lng })
+            console.log('🔧 Closed polygon by adding first point at end')
+          }
+        }
+        
+        const latLngCoords = closedCoords.map(coord => 
+          new window.google.maps.LatLng(coord.lat, coord.lng)
+        )
+        
+        const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords)
+        const areaInHectares = areaInSquareMeters / 10000
+        console.log('📊 Google Maps area calculation:', areaInSquareMeters, 'sq meters =', areaInHectares, 'hectares')
+        console.log('📊 Closed polygon coordinates used:', closedCoords.length, 'points')
+        return areaInHectares
+      } else {
+        console.log('⚠️ Google Maps Geometry Library not available, using fallback calculation')
+        
+        // Fallback calculation using bounding box
+        const lats = polygonCoords.map(p => p.lat)
+        const lngs = polygonCoords.map(p => p.lng)
+        const latDiff = Math.max(...lats) - Math.min(...lats)
+        const lngDiff = Math.max(...lngs) - Math.min(...lngs)
+        
+        // Convert to meters (1 degree ≈ 111,000 meters)
+        const areaInSquareMeters = latDiff * lngDiff * 111000 * 111000
+        const areaInHectares = areaInSquareMeters / 10000
+        
+        console.log('📊 Fallback area calculation:', areaInSquareMeters, 'sq meters =', areaInHectares, 'hectares')
+        console.log('📊 Bounding box:', { latDiff, lngDiff, lats, lngs })
+        return areaInHectares
+      }
+      
+    } catch (error) {
+      console.error('❌ Area calculation failed:', error)
+      
+      // Emergency fallback: use a simple bounding box calculation
+      try {
+        const lats = polygonCoords.map(p => p.lat)
+        const lngs = polygonCoords.map(p => p.lng)
+        const latDiff = Math.max(...lats) - Math.min(...lats)
+        const lngDiff = Math.max(...lngs) - Math.min(...lngs)
+        const areaInSquareMeters = latDiff * lngDiff * 111000 * 111000
+        const areaInHectares = areaInSquareMeters / 10000
+        console.log('📊 Emergency fallback area calculation:', areaInHectares, 'hectares')
+        return areaInHectares
+      } catch (fallbackError) {
+        console.error('❌ Emergency fallback also failed:', fallbackError)
+        return 0
+      }
+    }
+  }
+
+  // Enhanced residential address validation with geospatial check
+  const isResidentialAddress = (
+    coords: { lat: number; lng: number }, 
+    territoryPolygon: { lat: number; lng: number }[]
+  ): boolean => {
+    if (!territoryPolygon || territoryPolygon.length < 3) {
+      console.log('⚠️ No valid territory polygon for geospatial validation')
+      return false
+    }
+    
+    try {
+      // Use Google Maps geometry library for point-in-polygon check
+      if (window.google?.maps?.geometry?.poly) {
+        const point = new window.google.maps.LatLng(coords.lat, coords.lng)
+        const polygon = territoryPolygon.map(coord => 
+          new window.google.maps.LatLng(coord.lat, coord.lng)
+        )
+        
+        const googlePolygon = new window.google.maps.Polygon({ paths: polygon })
+        const isInside = window.google.maps.geometry.poly.containsLocation(point, googlePolygon)
+        
+        console.log(`📍 Geospatial check: (${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}) inside polygon: ${isInside}`)
+        return isInside
+      }
+      
+      // Fallback: simple bounding box check
+      const bounds = new window.google.maps.LatLngBounds()
+      territoryPolygon.forEach(coord => 
+        bounds.extend(new window.google.maps.LatLng(coord.lat, coord.lng))
+      )
+      const isInside = bounds.contains(new window.google.maps.LatLng(coords.lat, coords.lng))
+      
+      console.log(`📍 Bounding box check: (${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}) inside bounds: ${isInside}`)
+      return isInside
+      
+    } catch (error) {
+      console.error('❌ Geospatial validation failed:', error)
+      return false
+    }
+  }
+
+  // Search for specific house numbers on a street
+  const searchForHouseNumbers = async (streetInfo: any, streetName: string, territoryPolygon?: any): Promise<DetectedResident[]> => {
+    console.log('🔍 Searching for house numbers on:', streetName)
+    const residents: DetectedResident[] = []
+    
+    try {
+      const center = streetInfo.geometry?.location || { lat: streetInfo.lat, lng: streetInfo.lon }
+      
+      // Try systematic house numbers (1-100, both even and odd)
+      for (let number = 1; number <= 100; number++) {
+        try {
+          const addressQuery = `${number} ${streetName}`
+          setApiCallCount(prev => prev + 1)
+          
+          const geocoder = new window.google.maps.Geocoder()
+          const results = await new Promise<any[]>((resolve, reject) => {
+            geocoder.geocode({
+              address: addressQuery
+            }, (results, status) => {
+              if (status === window.google.maps.GeocoderStatus.OK && results) {
+                resolve(results)
+              } else {
+                resolve([])
+              }
+            })
+          })
+          
+          if (results.length > 0) {
+            const result = results[0]
+            const address = result.formatted_address
+            const buildingNumber = extractBuildingNumberFromAddressValidation(result)
+            
+            if (buildingNumber > 0 && isResidentialAddress(
+              { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() }, 
+              territoryPolygon || []
+            )) {
+              const location = result.geometry.location
+              residents.push({
+                id: `resident-search-${number}`,
+                name: `Resident ${number}`,
+                address: address,
+                buildingNumber: buildingNumber,
+                lat: location.lat(),
+                lng: location.lng(),
+                status: 'not-visited',
+                phone: '',
+                email: '',
+                notes: '',
+                lastVisited: null,
+                createdAt: new Date(),
+                updatedAt: new Date()
+              })
+              console.log(`🔍 Found house number ${number} at ${address}`)
+            }
+          }
+          
+          // Small delay between requests
+          await new Promise(resolve => setTimeout(resolve, 100))
+          
+        } catch (error) {
+          console.error(`❌ House number ${number} search failed:`, error)
+        }
+      }
+      
+      console.log(`🔍 House number search completed: ${residents.length} residents found`)
+      return residents
+      
+    } catch (error) {
+      console.error('❌ House number search failed:', error)
+      return []
+    }
+  }
+
   // Helper function to extract building number from Address Validation API response
   const extractBuildingNumberFromAddressValidation = (address: any): number => {
     console.log('Extracting building number from address:', address)
     
     if (!address) return 0
     
-    // Try to get building number from address components first
-    if (address.addressComponents) {
+    // Try to get building number from address components first (Google Geocoding API format)
+    if (address.address_components && Array.isArray(address.address_components)) {
+      for (const component of address.address_components) {
+        if (component.long_name && component.types) {
+          const text = component.long_name
+          console.log('Checking component:', component.types[0], text)
+          
+          // Look for street number component
+          if (component.types.includes('street_number')) {
+            const number = parseInt(text, 10)
+            if (number > 0 && number < 10000) {
+              console.log('Found street number:', number)
+              return number
+            }
+          }
+        }
+      }
+    }
+    
+    // Try to get building number from address components (Address Validation API format)
+    if (address.addressComponents && Array.isArray(address.addressComponents)) {
       for (const component of address.addressComponents) {
         if (component.componentName && component.componentName.text) {
           const text = component.componentName.text
@@ -1047,9 +1751,9 @@ export function ManuallyAssignTerritoryModal({
     }
     
     // Final fallback: extract from formatted address
-    if (address.formattedAddress) {
-      console.log('Checking formatted address:', address.formattedAddress)
-      return extractBuildingNumber(address.formattedAddress)
+    if (address.formatted_address) {
+      console.log('Checking formatted address:', address.formatted_address)
+      return extractBuildingNumber(address.formatted_address)
     }
     
     console.log('No building number found')
@@ -1237,11 +1941,11 @@ export function ManuallyAssignTerritoryModal({
                   />
                 </div>
                 
-                <div className="space-y-2">
-                  <Label htmlFor="selectedCity" className="text-sm font-medium text-gray-700">
-                    City *
-                  </Label>
-                  <div className="relative">
+                                 <div className="space-y-2">
+                   <Label htmlFor="selectedCity" className="text-sm font-medium text-gray-700">
+                     City *
+                   </Label>
+                   <div className="relative" data-dropdown="city">
                     <Input
                       id="selectedCity"
                       type="text"
@@ -1254,6 +1958,13 @@ export function ManuallyAssignTerritoryModal({
                           setShowResultsPanel(false)
                         } else {
                           setShowCitySuggestions(false)
+                          setShowResultsPanel(false)
+                        }
+                      }}
+                      onFocus={() => {
+                        if (selectedCity.length >= 2) {
+                          searchCities(selectedCity)
+                          setShowCitySuggestions(true)
                           setShowResultsPanel(false)
                         }
                       }}
@@ -1302,11 +2013,11 @@ export function ManuallyAssignTerritoryModal({
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="selectedNeighbourhood" className="text-sm font-medium text-gray-700">
-                    Neighbourhood/Area *
-                  </Label>
-                  <div className="relative">
+                                 <div className="space-y-2">
+                   <Label htmlFor="selectedNeighbourhood" className="text-sm font-medium text-gray-700">
+                     Neighbourhood/Area *
+                   </Label>
+                   <div className="relative" data-dropdown="neighbourhood">
                     <Input
                       id="selectedNeighbourhood"
                       type="text"
@@ -1336,6 +2047,16 @@ export function ManuallyAssignTerritoryModal({
                         } else {
                           console.log('Not calling searchNeighbourhoods - conditions not met')
                           setShowNeighbourhoodSuggestions(false)
+                          setShowResultsPanel(false)
+                        }
+                      }}
+                      onFocus={() => {
+                        if (selectedCity && selectedNeighbourhood.length >= 1) {
+                          searchNeighbourhoods(selectedNeighbourhood)
+                          setShowNeighbourhoodSuggestions(true)
+                          setShowResultsPanel(false)
+                        } else if (selectedCity && neighbourhoodSuggestions.length > 0) {
+                          setShowNeighbourhoodSuggestions(true)
                           setShowResultsPanel(false)
                         }
                       }}
@@ -1391,11 +2112,11 @@ export function ManuallyAssignTerritoryModal({
 
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="selectedStreet" className="text-sm font-medium text-gray-700">
-                  Street *
-                </Label>
-                <div className="relative">
+                             <div className="space-y-2">
+                 <Label htmlFor="selectedStreet" className="text-sm font-medium text-gray-700">
+                   Street *
+                 </Label>
+                                   <div className="relative" data-dropdown="street">
                   <Input
                     id="selectedStreet"
                     type="text"
@@ -1423,6 +2144,16 @@ export function ManuallyAssignTerritoryModal({
                       } else {
                         console.log('Not calling searchStreets - conditions not met')
                         setShowStreetSuggestions(false)
+                        setShowResultsPanel(false)
+                      }
+                    }}
+                    onFocus={() => {
+                      if (selectedNeighbourhood && streetInputValue.length >= 1) {
+                        searchStreets(streetInputValue)
+                        setShowStreetSuggestions(true)
+                        setShowResultsPanel(false)
+                      } else if (selectedNeighbourhood && streetSuggestions.length > 0) {
+                        setShowStreetSuggestions(true)
                         setShowResultsPanel(false)
                       }
                     }}
@@ -1474,6 +2205,25 @@ export function ManuallyAssignTerritoryModal({
                     </div>
                   )}
                 </div>
+                
+                {/* Load Manually Button - positioned below and to the right */}
+                {selectedNeighbourhood && !isLoadingStreets && (
+                  <div className="flex justify-end mt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        console.log('🔄 Loading streets manually for neighbourhood:', selectedNeighbourhood)
+                        loadStreetsForNeighbourhood(selectedNeighbourhood)
+                      }}
+                      className="text-xs px-3 py-1 h-8 border-blue-300 text-blue-600 hover:bg-blue-50"
+                    >
+                      <MapPin className="w-3 h-3 mr-1" />
+                      Load Streets Manually
+                    </Button>
+                  </div>
+                )}
               </div>
 
               {/* Selected Streets */}
@@ -1525,6 +2275,14 @@ export function ManuallyAssignTerritoryModal({
                       </>
                     )}
                   </Button>
+                  
+                  {/* Progress Display */}
+                  {isDetectingResidents && detectionProgress && (
+                    <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded-md">
+                      <div className="text-sm text-blue-800 font-medium">🔄 {detectionProgress}</div>
+                      <div className="text-xs text-blue-600 mt-1">API Calls: {apiCallCount}</div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1627,17 +2385,13 @@ export function ManuallyAssignTerritoryModal({
                           <div>
                             <span>Estimated Area:</span>
                             <span className="ml-1 font-medium">
-                              {generatedPolygon.length > 0 ? `${Math.round(window.google.maps.geometry.spherical.computeArea(
-                                generatedPolygon.map((coord: { lat: number; lng: number }) => new window.google.maps.LatLng(coord.lat, coord.lng))
-                              ))} sq meters` : 'Calculating...'}
+                              {territoryArea > 0 ? `${territoryArea.toFixed(2)} ha (${Math.round(territoryArea * 10000)} sq meters)` : 'Calculating...'}
                             </span>
                           </div>
                           <div>
                             <span>Building Density:</span>
                             <span className="ml-1 font-medium">
-                              ~{Math.round(detectedResidents.length / (generatedPolygon.length > 0 ? window.google.maps.geometry.spherical.computeArea(
-                                generatedPolygon.map((coord: { lat: number; lng: number }) => new window.google.maps.LatLng(coord.lat, coord.lng))
-                              ) / 10000 : 1))} buildings/ha
+                              ~{buildingDensity.toFixed(1)} buildings/ha
                             </span>
                           </div>
                         </div>
@@ -1660,7 +2414,7 @@ export function ManuallyAssignTerritoryModal({
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5"
                 disabled={!territoryName.trim() || !selectedCity || !selectedNeighbourhood || selectedStreets.length === 0 || detectedResidents.length === 0}
               >
-                Next Step
+                Save Territory
               </Button>
               <Button
                 type="button"

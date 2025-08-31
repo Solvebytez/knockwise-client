@@ -319,8 +319,11 @@ export async function getStreetsInNeighbourhood(neighbourhood: Neighbourhood): P
         area(${3600000000 + osmId})->.searchArea;
         
         (
-          way["highway"~"residential|tertiary|secondary|primary|service|unclassified"](area.searchArea);
-          way["highway"~"living_street|pedestrian"](area.searchArea);
+          way["highway"~"residential|tertiary|secondary|primary|service|unclassified|living_street|pedestrian"](area.searchArea);
+          way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"](area.searchArea);
+          way["highway"~"trunk|trunk_link|motorway|motorway_link"](area.searchArea);
+          way["highway"~"footway|path|track|cycleway"](area.searchArea);
+          way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"](area.searchArea);
         );
         out body;
         >;
@@ -335,8 +338,11 @@ export async function getStreetsInNeighbourhood(neighbourhood: Neighbourhood): P
       query = `
         [out:json][timeout:25];
         (
-          way["highway"~"residential|tertiary|secondary|primary|service|unclassified"](around:${radius},${lat},${lon});
-          way["highway"~"living_street|pedestrian"](around:${radius},${lat},${lon});
+          way["highway"~"residential|tertiary|secondary|primary|service|unclassified|living_street|pedestrian"](around:${radius},${lat},${lon});
+          way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"](around:${radius},${lat},${lon});
+          way["highway"~"trunk|trunk_link|motorway|motorway_link"](around:${radius},${lat},${lon});
+          way["highway"~"footway|path|track|cycleway"](around:${radius},${lat},${lon});
+          way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"](around:${radius},${lat},${lon});
         );
         out body;
         >;
@@ -405,7 +411,8 @@ export async function getStreetsInNeighbourhood(neighbourhood: Neighbourhood): P
         const fallbackQuery = `
           [out:json][timeout:15];
           (
-            way["highway"="residential"]["name"](around:500,${neighbourhood.lat},${neighbourhood.lon});
+            way["highway"~"residential|service|unclassified|living_street"]["name"](around:500,${neighbourhood.lat},${neighbourhood.lon});
+            way["highway"~"alley|cul_de_sac|drive|avenue|crescent|circle|court|place|terrace|lane"](around:500,${neighbourhood.lat},${neighbourhood.lon});
           );
           out body;
           >;
@@ -461,6 +468,38 @@ export async function getStreetsInNeighbourhoodByName(neighbourhoodName: string,
   // Extract just the neighbourhood name (remove city suffix if present)
   const cleanNeighbourhoodName = neighbourhoodName.split(',')[0].trim();
   console.log('🧹 Cleaned neighbourhood name:', cleanNeighbourhoodName);
+  
+  // First, try to get proper coordinates for the neighbourhood using Google Geocoding
+  console.log('🌐 Getting coordinates for neighbourhood via Google Geocoding...');
+  let neighbourhoodLat = 0;
+  let neighbourhoodLon = 0;
+  
+  try {
+    const geocodeQuery = `${cleanNeighbourhoodName}, ${cityName}`;
+    const geocodeUrl = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(geocodeQuery)}&key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}`;
+    
+    const geocodeResponse = await fetch(geocodeUrl);
+    const geocodeData = await geocodeResponse.json();
+    
+    console.log('📦 Geocoding response:', geocodeData);
+    
+    if (geocodeData.results && geocodeData.results.length > 0) {
+      const result = geocodeData.results[0];
+      neighbourhoodLat = result.geometry.location.lat;
+      neighbourhoodLon = result.geometry.location.lng;
+      console.log('✅ Got coordinates from Google Geocoding:', neighbourhoodLat, neighbourhoodLon);
+    } else {
+      console.log('❌ No geocoding results, using fallback coordinates for Brampton');
+      // Fallback coordinates for Brampton area
+      neighbourhoodLat = 43.6831;
+      neighbourhoodLon = -79.7662;
+    }
+  } catch (geocodeError) {
+    console.log('❌ Geocoding failed, using fallback coordinates:', geocodeError);
+    // Fallback coordinates for Brampton area
+    neighbourhoodLat = 43.6831;
+    neighbourhoodLon = -79.7662;
+  }
   
   try {
     // First, try to find the neighbourhood boundary with exact name
@@ -537,10 +576,12 @@ export async function getStreetsInNeighbourhoodByName(neighbourhoodName: string,
             [out:json][timeout:25];
             area["name"="${esc(cityName)}"]["boundary"="administrative"]->.city;
             (
-              way["highway"~"residential|tertiary|secondary|primary|service|unclassified"]["name"~"${esc(cleanNeighbourhoodName)}",i](area.city);
-              way["highway"~"living_street|pedestrian"]["name"~"${esc(cleanNeighbourhoodName)}",i](area.city);
-              way["highway"~"residential|tertiary|secondary|primary|service|unclassified"](area.city);
-              way["highway"~"living_street|pedestrian"](area.city);
+              way["highway"~"residential|tertiary|secondary|primary|service|unclassified|living_street|pedestrian"]["name"~"${esc(cleanNeighbourhoodName)}",i](area.city);
+              way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"]["name"~"${esc(cleanNeighbourhoodName)}",i](area.city);
+              way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"]["name"~"${esc(cleanNeighbourhoodName)}",i](area.city);
+              way["highway"~"residential|tertiary|secondary|primary|service|unclassified|living_street|pedestrian"](area.city);
+              way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"](area.city);
+              way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"](area.city);
             );
             out body;
             >;
@@ -583,13 +624,11 @@ export async function getStreetsInNeighbourhoodByName(neighbourhoodName: string,
                 [out:json][timeout:30];
                 area["name"="${esc(cityName)}"]["boundary"="administrative"]->.city;
                 (
-                  way["highway"="residential"]["name"](area.city);
-                  way["highway"="service"]["name"](area.city);
-                  way["highway"="unclassified"]["name"](area.city);
-                  way["highway"="living_street"]["name"](area.city);
-                  way["highway"="tertiary"]["name"](area.city);
-                  way["highway"="secondary"]["name"](area.city);
-                  way["highway"="primary"]["name"](area.city);
+                  way["highway"~"residential|service|unclassified|living_street"]["name"](area.city);
+                  way["highway"~"tertiary|secondary|primary"]["name"](area.city);
+                  way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"]["name"](area.city);
+                  way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"]["name"](area.city);
+                  way["highway"~"footway|path|track|cycleway"]["name"](area.city);
                 );
                 out body;
                 >;
@@ -652,8 +691,10 @@ export async function getStreetsInNeighbourhoodByName(neighbourhoodName: string,
           const streetsQuery = `
             [out:json][timeout:25];
             (
-              way["highway"~"residential|tertiary|secondary|primary|service|unclassified"](around:${radius},${lat},${lon});
-              way["highway"~"living_street|pedestrian"](around:${radius},${lat},${lon});
+              way["highway"~"residential|tertiary|secondary|primary|service|unclassified|living_street|pedestrian"](around:${radius},${lat},${lon});
+              way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"](around:${radius},${lat},${lon});
+              way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"](around:${radius},${lat},${lon});
+              way["highway"~"footway|path|track|cycleway"](around:${radius},${lat},${lon});
             );
             out body;
             >;
@@ -737,12 +778,60 @@ export async function getStreetsInNeighbourhoodByName(neighbourhoodName: string,
         id: `osm_${neighbourhood.type}_${neighbourhood.id}`,
         name: cleanNeighbourhoodName,
         type: 'neighbourhood',
-        lat: neighbourhood.lat || neighbourhood.center?.lat || 0,
-        lon: neighbourhood.lon || neighbourhood.center?.lon || 0,
+        lat: neighbourhood.lat || neighbourhood.center?.lat || neighbourhoodLat,
+        lon: neighbourhood.lon || neighbourhood.center?.lon || neighbourhoodLon,
         source: 'overpass',
       };
       
       return await getStreetsInNeighbourhood(neighbourhoodObj);
+    }
+    
+    // If no neighbourhood found in OSM, try searching for streets using the coordinates we got from Google Geocoding
+    console.log('🔄 No neighbourhood found in OSM, trying coordinate-based street search...');
+    
+    if (neighbourhoodLat !== 0 && neighbourhoodLon !== 0) {
+      const coordinateBasedQuery = `
+        [out:json][timeout:25];
+        (
+          way["highway"~"residential|tertiary|secondary|primary|service|unclassified|living_street|pedestrian"](around:2000,${neighbourhoodLat},${neighbourhoodLon});
+          way["highway"~"residential_link|tertiary_link|secondary_link|primary_link"](around:2000,${neighbourhoodLat},${neighbourhoodLon});
+          way["highway"~"alley|cul_de_sac|drive|avenue|boulevard|crescent|circle|court|place|terrace|lane|road|street"](around:2000,${neighbourhoodLat},${neighbourhoodLon});
+        );
+        out body;
+        >;
+        out skel qt;
+      `;
+      
+      console.log('🌐 Coordinate-based street search query:', coordinateBasedQuery);
+      
+      try {
+        const coordinateData = await overpass<{ elements: any[] }>(coordinateBasedQuery);
+        const coordinateStreets = coordinateData.elements || [];
+        
+        console.log('📊 Coordinate-based streets found:', coordinateStreets.length);
+        
+        const formattedCoordinateStreets = coordinateStreets
+          .filter(street => street.tags?.name)
+          .map(street => ({
+            id: `osm_way_${street.id}`,
+            name: street.tags.name,
+            type: street.tags.highway,
+            lat: street.center?.lat || street.lat,
+            lon: street.center?.lon || street.lon,
+            source: 'overpass' as const,
+          }))
+          .filter((street, index, self) => 
+            index === self.findIndex(s => s.name === street.name)
+          );
+        
+        console.log('✅ Coordinate-based formatted streets:', formattedCoordinateStreets.length);
+        
+        if (formattedCoordinateStreets.length > 0) {
+          return formattedCoordinateStreets;
+        }
+      } catch (coordinateError) {
+        console.log('❌ Coordinate-based search failed:', coordinateError);
+      }
     }
     
     return [];

@@ -539,7 +539,8 @@ export function TerritoryMap() {
         buildingData: {
           addresses: territoryData.buildingData.addresses,
           coordinates: territoryData.buildingData.coordinates
-        }
+        },
+        zoneType: 'MAP' // Indicate this zone was created via map drawing
       })
 
       if (response.data.success) {
