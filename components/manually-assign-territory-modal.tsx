@@ -1760,7 +1760,82 @@ export function ManuallyAssignTerritoryModal({
     return 0
   }
 
-  // Save territory using existing API
+  // Validate territory data before saving
+  const validateTerritoryData = useCallback((data: any) => {
+    const errors: string[] = []
+    
+    // Validate name
+    if (!data.name || data.name.trim().length < 2) {
+      errors.push('Territory name must be at least 2 characters long')
+    }
+    
+    // Validate boundary
+    if (!data.boundary || !data.boundary.coordinates || data.boundary.coordinates.length < 3) {
+      errors.push('Territory boundary must have at least 3 coordinate points')
+    }
+    
+    // Validate building data
+    if (!data.buildingData || !data.buildingData.addresses || data.buildingData.addresses.length === 0) {
+      errors.push('Territory must have at least one detected building')
+    }
+    
+    // Validate polygon closure
+    if (data.boundary && data.boundary.coordinates && data.boundary.coordinates.length > 0) {
+      const coords = data.boundary.coordinates[0]
+      if (coords.length > 0) {
+        const first = coords[0]
+        const last = coords[coords.length - 1]
+        if (first[0] !== last[0] || first[1] !== last[1]) {
+          errors.push('Territory boundary polygon must be closed (first and last points must be identical)')
+        }
+      }
+    }
+    
+    return errors
+  }, [])
+
+  // Check for zone overlaps before saving
+  const checkZoneOverlap = useCallback(async (boundary: any, buildingData: any) => {
+    try {
+      console.log('🔍 Checking for zone overlaps...')
+      
+      const response = await apiInstance.post('/zones/check-overlap', {
+        boundary,
+        buildingData
+      })
+
+      if (response.data.success) {
+        const { hasOverlap, overlappingZones, duplicateBuildings, isValid } = response.data.data
+        
+        if (hasOverlap) {
+          const zoneNames = overlappingZones.map((zone: any) => zone.name).join(', ')
+          toast.error(`❌ Territory overlaps with existing zones: ${zoneNames}`)
+          return false
+        }
+        
+        if (duplicateBuildings && duplicateBuildings.length > 0) {
+          toast.error(`❌ ${duplicateBuildings.length} buildings are already assigned to other territories`)
+          return false
+        }
+        
+        if (!isValid) {
+          toast.error('❌ Territory boundary is invalid')
+          return false
+        }
+        
+        console.log('✅ Zone overlap check passed')
+        return true
+      }
+      
+      return false
+    } catch (error) {
+      console.error('❌ Error checking zone overlap:', error)
+      // Continue with save even if overlap check fails
+      return true
+    }
+  }, [])
+
+  // Save territory using enhanced API with proper data structure
   const saveTerritory = useCallback(async () => {
     if (!territoryName.trim() || !generatedPolygon || detectedResidents.length === 0) {
       toast.error("Please complete all required fields")
@@ -1770,25 +1845,75 @@ export function ManuallyAssignTerritoryModal({
     setIsSavingTerritory(true)
 
     try {
-      // Prepare building data for backend (same format as map sidebar)
-      const buildingData = {
-        addresses: detectedResidents.map(resident => resident.address),
-        coordinates: detectedResidents.map(resident => [resident.lng, resident.lat])
+      console.log('🚀 saveTerritory: Starting territory save...')
+      console.log('📝 Territory data:', {
+        name: territoryName.trim(),
+        description: territoryDescription.trim(),
+        residentsCount: detectedResidents.length,
+        polygonPoints: generatedPolygon.length
+      })
+
+      // Ensure polygon is closed (first and last coordinates must be identical for GeoJSON)
+      const polygonCoords = generatedPolygon.map((coord: any) => [coord.lng, coord.lat])
+      
+      // Close the polygon if it's not already closed
+      if (polygonCoords.length > 0) {
+        const firstCoord = polygonCoords[0]
+        const lastCoord = polygonCoords[polygonCoords.length - 1]
+        
+        if (firstCoord[0] !== lastCoord[0] || firstCoord[1] !== lastCoord[1]) {
+          polygonCoords.push([...firstCoord]) // Add first coordinate at the end
+          console.log('🔧 Closed polygon by adding first point at end')
+        }
       }
 
-      // Call the same API as map sidebar
-      const response = await apiInstance.post('/zones/create-zone', {
+      // Prepare building data for backend with enhanced structure
+      const buildingData = {
+        addresses: detectedResidents.map(resident => resident.address),
+        coordinates: detectedResidents.map(resident => [resident.lng, resident.lat]),
+        totalBuildings: detectedResidents.length,
+        residentialHomes: detectedResidents.filter(r => r.buildingNumber).length
+      }
+
+      // Prepare territory data with all required fields
+      const territoryData = {
         name: territoryName.trim(),
         description: territoryDescription.trim(),
         boundary: {
           type: 'Polygon',
-          coordinates: [generatedPolygon]
+          coordinates: [polygonCoords]
         },
-        buildingData
-      })
+        buildingData,
+        zoneType: 'MANUAL_DETECTION', // Indicate this zone was created via manual detection
+        // Optional: Add team assignment if provided
+        ...(assignedRep && { teamId: assignedRep }),
+        // Optional: Add effective date if provided
+        ...(assignedDate && { effectiveFrom: assignedDate })
+      }
+
+      console.log('📤 Sending territory data to backend:', territoryData)
+
+      // Validate territory data before saving
+      const validationErrors = validateTerritoryData(territoryData)
+      if (validationErrors.length > 0) {
+        toast.error(`❌ Validation failed: ${validationErrors.join(', ')}`)
+        setIsSavingTerritory(false)
+        return
+      }
+
+      // Check for overlaps before saving
+      const overlapCheckPassed = await checkZoneOverlap(territoryData.boundary, territoryData.buildingData)
+      if (!overlapCheckPassed) {
+        setIsSavingTerritory(false)
+        return
+      }
+
+      // Call the zones API with enhanced data structure
+      const response = await apiInstance.post('/zones/create-zone', territoryData)
 
       if (response.data.success) {
         const savedTerritory = response.data.data
+        console.log('✅ Territory saved successfully:', savedTerritory)
         
         // Call the callback to notify parent component
         onTerritorySaved(savedTerritory)
@@ -1796,26 +1921,45 @@ export function ManuallyAssignTerritoryModal({
         // Reset form
         resetForm()
         
-        toast.success(`Territory "${territoryName}" saved successfully!`)
+        // Enhanced success message with territory details
+        toast.success(`✅ Territory "${territoryName}" saved successfully! 
+          📊 ${detectedResidents.length} residents detected
+          📍 Area: ${territoryArea.toFixed(2)} ha
+          🏠 Density: ${buildingDensity.toFixed(1)} buildings/ha`)
       } else {
         throw new Error(response.data.message || 'Failed to save territory')
       }
     } catch (error) {
-      console.error('Error saving territory:', error)
+      console.error('❌ Error saving territory:', error)
       
+      // Enhanced error handling with specific backend error messages
       if (error && typeof error === 'object' && 'response' in error) {
         const axiosError = error as any
+        console.error('Backend response data:', axiosError.response?.data)
+        console.error('Backend response status:', axiosError.response?.status)
+        
         if (axiosError.response?.data?.message) {
-          toast.error(axiosError.response.data.message)
+          // Handle specific backend error cases
+          const errorMessage = axiosError.response.data.message
+          
+          if (errorMessage.includes('already exists')) {
+            toast.error(`❌ Territory name "${territoryName}" already exists. Please choose a different name.`)
+          } else if (errorMessage.includes('overlaps')) {
+            toast.error(`❌ Territory overlaps with existing zones. Please adjust the boundaries.`)
+          } else if (errorMessage.includes('duplicate buildings')) {
+            toast.error(`❌ Some buildings are already assigned to other territories.`)
+          } else {
+            toast.error(`❌ ${errorMessage}`)
+          }
           return
         }
       }
       
-      toast.error(error instanceof Error ? error.message : 'Unknown error occurred')
+      toast.error(error instanceof Error ? error.message : '❌ Unknown error occurred while saving territory')
     } finally {
       setIsSavingTerritory(false)
     }
-  }, [territoryName, territoryDescription, generatedPolygon, detectedResidents, onTerritorySaved])
+  }, [territoryName, territoryDescription, generatedPolygon, detectedResidents, assignedRep, assignedDate, territoryArea, buildingDensity, onTerritorySaved])
 
   // Reset form
   const resetForm = () => {
