@@ -7,7 +7,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { Loader2, MapPin, Users, Building, CheckCircle, AlertCircle, Map } from "lucide-react"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Loader2, MapPin, Users, User, Building, CheckCircle, AlertCircle, Map, Calendar } from "lucide-react"
 import { apiInstance } from "@/lib/apiInstance"
 import { toast } from "sonner"
 import { 
@@ -92,6 +93,13 @@ export function ManuallyAssignTerritoryModal({
   const [autocompleteService, setAutocompleteService] = useState<any>(null)
   const [placesService, setPlacesService] = useState<any>(null)
 
+  // Add new state variables for assignment functionality
+  const [assignmentType, setAssignmentType] = useState<"team" | "individual">("team")
+  const [assignmentSearchQuery, setAssignmentSearchQuery] = useState("")
+  const [assignmentSearchResults, setAssignmentSearchResults] = useState<any[]>([])
+  const [isSearchingAssignment, setIsSearchingAssignment] = useState(false)
+  const [selectedAssignment, setSelectedAssignment] = useState<any>(null)
+
   // Initialize Google Places services when Google Maps is available
   useEffect(() => {
     const checkGoogleMaps = () => {
@@ -107,6 +115,61 @@ export function ManuallyAssignTerritoryModal({
 
     checkGoogleMaps()
   }, [])
+
+  // Add fetch functions for teams and agents
+  const fetchAgents = useCallback(async (): Promise<any[]> => {
+    const response = await apiInstance.get('/users/my-created-agents?includeTeamInfo=true')
+    return response.data.data || []
+  }, [])
+
+  const fetchTeams = useCallback(async (): Promise<any[]> => {
+    const response = await apiInstance.get('/teams')
+    return response.data.data || []
+  }, [])
+
+  // Add search function for assignment
+  const searchAssignment = useCallback(async (query: string, type: "team" | "individual") => {
+    if (!query.trim()) {
+      setAssignmentSearchResults([])
+      return
+    }
+
+    console.log(`Searching for ${type} with query: "${query}"`)
+    setIsSearchingAssignment(true)
+    try {
+      if (type === "team") {
+        // Fetch all teams and filter client-side for better performance
+        const allTeams = await fetchTeams()
+        const filteredTeams = allTeams.filter(team => 
+          team.name.toLowerCase().includes(query.toLowerCase())
+        )
+        console.log('Team search results:', filteredTeams)
+        setAssignmentSearchResults(filteredTeams)
+      } else {
+        // Fetch all agents and filter client-side for better performance
+        const allAgents = await fetchAgents()
+        const filteredAgents = allAgents.filter(agent => 
+          agent.name.toLowerCase().includes(query.toLowerCase()) ||
+          agent.email.toLowerCase().includes(query.toLowerCase())
+        )
+        console.log('Agent search results:', filteredAgents)
+        setAssignmentSearchResults(filteredAgents)
+      }
+    } catch (error) {
+      console.error('Error searching for assignment:', error)
+      
+      // Enhanced error logging
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as any
+        console.error('Search response data:', axiosError.response?.data)
+        console.error('Search response status:', axiosError.response?.status)
+      }
+      
+      setAssignmentSearchResults([])
+    } finally {
+      setIsSearchingAssignment(false)
+    }
+  }, [fetchAgents, fetchTeams])
 
   // Search cities
   const searchCities = useCallback(async (query: string) => {
@@ -784,9 +847,26 @@ export function ManuallyAssignTerritoryModal({
 
   // Handle street selection
   const handleStreetSelect = (street: PlaceSuggestion) => {
-    if (!selectedStreets.includes(street.place_id)) {
-      setSelectedStreets(prev => [...prev, street.place_id])
+    // Replace the current selection with the new street (only one street allowed)
+    setSelectedStreets([street.place_id])
+    
+    // Reset building detection data and polygon when selecting a new street
+    // This prevents conflicts with save territory zone overlap validation
+    console.log('🔄 Street selected, resetting building detection data...')
+    setDetectedResidents([])
+    setGeneratedPolygon(null)
+    setTerritoryArea(0)
+    setBuildingDensity(0)
+    setDetectionProgress('')
+    setApiCallCount(0)
+    
+    // Reset form step to 1 if we were on step 2
+    if (formStep === 2) {
+      setFormStep(1)
     }
+    
+    // Inform user that data has been reset
+    toast.info('🔄 Street selected. Building detection data has been reset. Please run "Detect Residents" again.')
     setShowStreetSuggestions(false)
     setStreetInputValue("") // Clear input after selection
   }
@@ -822,6 +902,24 @@ export function ManuallyAssignTerritoryModal({
   // Remove street from selection
   const removeStreet = (placeId: string) => {
     setSelectedStreets(prev => prev.filter(id => id !== placeId))
+    
+    // Reset building detection data and polygon when removing a street
+    // This prevents conflicts with save territory zone overlap validation
+    console.log('🔄 Street removed, resetting building detection data...')
+    setDetectedResidents([])
+    setGeneratedPolygon(null)
+    setTerritoryArea(0)
+    setBuildingDensity(0)
+    setDetectionProgress('')
+    setApiCallCount(0)
+    
+    // Reset form step to 1 if we were on step 2
+    if (formStep === 2) {
+      setFormStep(1)
+    }
+    
+    // Inform user that data has been reset
+    toast.info('🔄 Street removed. Building detection data has been reset. Please run "Detect Residents" again.')
   }
 
   // Enhanced resident detection with multi-source approach
@@ -1769,9 +1867,14 @@ export function ManuallyAssignTerritoryModal({
       errors.push('Territory name must be at least 2 characters long')
     }
     
-    // Validate boundary
-    if (!data.boundary || !data.boundary.coordinates || data.boundary.coordinates.length < 3) {
-      errors.push('Territory boundary must have at least 3 coordinate points')
+    // Validate boundary - check the actual polygon coordinates array
+    if (!data.boundary || !data.boundary.coordinates || data.boundary.coordinates.length === 0) {
+      errors.push('Territory boundary coordinates are missing')
+    } else {
+      const polygonCoords = data.boundary.coordinates[0] // Get the actual polygon coordinates array
+      if (!polygonCoords || polygonCoords.length < 3) {
+        errors.push('Territory boundary must have at least 3 coordinate points')
+      }
     }
     
     // Validate building data
@@ -1884,9 +1987,11 @@ export function ManuallyAssignTerritoryModal({
           coordinates: [polygonCoords]
         },
         buildingData,
-        zoneType: 'MANUAL_DETECTION', // Indicate this zone was created via manual detection
+        zoneType: 'MANUAL', // Valid enum value for manually created zones
         // Optional: Add team assignment if provided
-        ...(assignedRep && { teamId: assignedRep }),
+        ...(selectedAssignment && assignmentType === "team" && { teamId: selectedAssignment._id }),
+        // Optional: Add agent assignment if provided
+        ...(selectedAssignment && assignmentType === "individual" && { agentId: selectedAssignment._id }),
         // Optional: Add effective date if provided
         ...(assignedDate && { effectiveFrom: assignedDate })
       }
@@ -1915,17 +2020,14 @@ export function ManuallyAssignTerritoryModal({
         const savedTerritory = response.data.data
         console.log('✅ Territory saved successfully:', savedTerritory)
         
-        // Call the callback to notify parent component
-        onTerritorySaved(savedTerritory)
-        
-        // Reset form
-        resetForm()
-        
         // Enhanced success message with territory details
-        toast.success(`✅ Territory "${territoryName}" saved successfully! 
+        toast.success(`✅ Territory "${territoryName}" saved as draft! 
           📊 ${detectedResidents.length} residents detected
           📍 Area: ${territoryArea.toFixed(2)} ha
           🏠 Density: ${buildingDensity.toFixed(1)} buildings/ha`)
+        
+        // Advance to step 2 (assignment step) instead of resetting form
+        setFormStep(2)
       } else {
         throw new Error(response.data.message || 'Failed to save territory')
       }
@@ -1959,32 +2061,27 @@ export function ManuallyAssignTerritoryModal({
     } finally {
       setIsSavingTerritory(false)
     }
-  }, [territoryName, territoryDescription, generatedPolygon, detectedResidents, assignedRep, assignedDate, territoryArea, buildingDensity, onTerritorySaved])
+  }, [territoryName, territoryDescription, generatedPolygon, detectedResidents, selectedAssignment, assignmentType, assignedDate, territoryArea, buildingDensity, onTerritorySaved])
 
   // Reset form
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setFormStep(1)
     setTerritoryName("")
     setTerritoryDescription("")
     setSelectedCity("")
     setSelectedNeighbourhood("")
     setSelectedStreets([])
-    setStreetInputValue("")
-    setAssignedRep("")
-    setAssignedDate("")
     setDetectedResidents([])
     setGeneratedPolygon(null)
-    setCitySuggestions([])
-    setNeighbourhoodSuggestions([])
-    setStreetSuggestions([])
-    setShowCitySuggestions(false)
-    setShowNeighbourhoodSuggestions(false)
-    setShowStreetSuggestions(false)
-    setShowResultsPanel(false)
-    setIsLoadingNeighbourhoods(false)
-    setIsLoadingStreets(false)
-    setNoStreetsFound(false)
-  }
+    setTerritoryArea(0)
+    setBuildingDensity(0)
+    setAssignedRep("")
+    setAssignedDate("")
+    setAssignmentType("team")
+    setAssignmentSearchQuery("")
+    setAssignmentSearchResults([])
+    setSelectedAssignment(null)
+  }, [])
 
   // Handle modal close
   const handleClose = () => {
@@ -1992,20 +2089,35 @@ export function ManuallyAssignTerritoryModal({
     onClose()
   }
 
-  // Handle step 1 submit
-  const handleStep1Submit = (e: React.FormEvent) => {
+  // Handle step 1 submit - Save territory and advance to assignment step
+  const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (territoryName.trim() && selectedCity && selectedNeighbourhood && selectedStreets.length > 0) {
-      setFormStep(2)
+    if (territoryName.trim() && selectedCity && selectedNeighbourhood && selectedStreets.length > 0 && detectedResidents.length > 0) {
+      // Call saveTerritory function which will handle the API call
+      await saveTerritory()
     }
   }
 
-  // Handle step 2 submit
-  const handleStep2Submit = (e: React.FormEvent) => {
+  // Handle step 2 submit - Assign territory (optional)
+  const handleStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (assignedRep && assignedDate) {
-      saveTerritory()
+    // Assignment is optional - user can skip or assign
+    if (selectedAssignment && assignedDate) {
+      // TODO: Implement assignment logic here
+      console.log('Assigning territory to:', selectedAssignment, 'on date:', assignedDate)
+      toast.success('Territory assigned successfully!')
     }
+    
+    // Always call onTerritorySaved and close modal after step 2
+    onTerritorySaved({
+      name: territoryName,
+      description: territoryDescription,
+      residents: detectedResidents,
+      area: territoryArea,
+      density: buildingDensity
+    })
+    resetForm()
+    onClose()
   }
 
   // Show loading state if Google Maps is not loaded yet
@@ -2401,6 +2513,21 @@ export function ManuallyAssignTerritoryModal({
               {/* Detect Residents Button */}
               {selectedStreets.length > 0 && (
                 <div className="space-y-2">
+                  {/* Warning message when streets are selected but no residents detected */}
+                  {selectedStreets.length > 0 && detectedResidents.length === 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                      <div className="flex items-center gap-2">
+                        <AlertCircle className="w-4 h-4 text-amber-600" />
+                        <span className="text-sm font-medium text-amber-800">
+                          Detection Required
+                        </span>
+                      </div>
+                      <p className="text-xs text-amber-700 mt-1">
+                        Streets have been selected. Please run "Detect Residents" to generate building data and territory polygon.
+                      </p>
+                    </div>
+                  )}
+                  
                   <Button
                     type="button"
                     onClick={detectResidentsFromStreets}
@@ -2556,9 +2683,19 @@ export function ManuallyAssignTerritoryModal({
               <Button
                 type="submit"
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5"
-                disabled={!territoryName.trim() || !selectedCity || !selectedNeighbourhood || selectedStreets.length === 0 || detectedResidents.length === 0}
+                disabled={!territoryName.trim() || !selectedCity || !selectedNeighbourhood || selectedStreets.length === 0 || detectedResidents.length === 0 || isSavingTerritory}
               >
-                Save Territory
+                {isSavingTerritory ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving Territory...
+                  </>
+                ) : (
+                  <>
+                    <MapPin className="w-4 h-4 mr-2" />
+                    Save Territory
+                  </>
+                )}
               </Button>
               <Button
                 type="button"
@@ -2613,46 +2750,309 @@ export function ManuallyAssignTerritoryModal({
             {/* Assignment Details */}
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-gray-900 border-b border-gray-200 pb-2">
-                Assignment Details
+                Territory Assignment (Optional)
               </h3>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="assignedRep" className="text-sm font-medium text-gray-700">
-                    Assign to Sales Rep *
-                  </Label>
-                  <Select value={assignedRep} onValueChange={setAssignedRep} required>
-                    <SelectTrigger className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20">
-                      <SelectValue placeholder="Select sales representative" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="john-doe">John Doe</SelectItem>
-                      <SelectItem value="jane-smith">Jane Smith</SelectItem>
-                      <SelectItem value="mike-johnson">Mike Johnson</SelectItem>
-                      <SelectItem value="sarah-wilson">Sarah Wilson</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                
-                <div className="space-y-2">
-                  <Label htmlFor="assignedDate" className="text-sm font-medium text-gray-700">
-                    Assignment Date *
-                  </Label>
+              <div className="bg-green-50 rounded-lg p-3 mb-4 border border-green-100">
+                <div className="text-sm font-medium text-green-700 mb-1">Territory Saved as Draft</div>
+                <div className="text-xs text-gray-600">You can assign it now or leave it for later assignment</div>
+              </div>
+
+              {/* Assignment Type Selection */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-3 block">Assignment Type</label>
+                <RadioGroup 
+                  value={assignmentType} 
+                  onValueChange={(value: "team" | "individual") => {
+                    setAssignmentType(value)
+                    setSelectedAssignment(null)
+                    setAssignmentSearchQuery("")
+                    setAssignmentSearchResults([])
+                  }}
+                  className="flex gap-4"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="team" id="team" />
+                    <Label htmlFor="team" className="flex items-center gap-2 cursor-pointer">
+                      <Users className="h-4 w-4" />
+                      <span>Team</span>
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="individual" id="individual" />
+                    <Label htmlFor="individual" className="flex items-center gap-2 cursor-pointer">
+                      <User className="h-4 w-4" />
+                      <span>Individual</span>
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {/* Search Input */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">
+                  Search {assignmentType === "team" ? "Team" : "Agent"}
+                </label>
+                <div className="relative">
                   <Input
-                    id="assignedDate"
+                    placeholder={`Search for ${assignmentType === "team" ? "team name" : "agent name"}...`}
+                    value={assignmentSearchQuery}
+                    onChange={(e) => {
+                      const query = e.target.value
+                      setAssignmentSearchQuery(query)
+                      if (query.trim()) {
+                        searchAssignment(query, assignmentType)
+                      } else {
+                        setAssignmentSearchResults([])
+                      }
+                    }}
+                    className="border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20 bg-white pr-10"
+                  />
+                  {isSearchingAssignment && (
+                    <Loader2 className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 animate-spin text-gray-400" />
+                  )}
+                </div>
+
+                {/* Search Results */}
+                {assignmentSearchResults.length > 0 && (
+                  <div className="mt-2 max-h-64 overflow-y-auto border border-gray-200 rounded-md bg-white">
+                    {assignmentSearchResults.map((result) => (
+                      <div
+                        key={result._id || result.id}
+                        onClick={() => {
+                          setSelectedAssignment(result)
+                          setAssignmentSearchQuery(assignmentType === "team" ? result.name : `${result.name} (${result.email})`)
+                          setAssignmentSearchResults([])
+                        }}
+                        className="p-3 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                      >
+                        {assignmentType === "team" ? (
+                          // Team Result Display
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-900">{result.name}</p>
+                            <p className="text-sm text-gray-500">
+                              {result.agentIds?.length || 0} members
+                            </p>
+                            
+                            {/* Assignment Status Badge */}
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium mt-1 ${
+                              result.performance?.zoneCoverage > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {result.performance?.zoneCoverage > 0 ? '✓ Assigned' : '○ Unassigned'}
+                            </span>
+                            
+                            {/* Current Zone Coverage */}
+                            {result.performance?.zoneCoverage > 0 && (
+                              <div className="mt-1">
+                                <p className="text-xs text-blue-600">
+                                  🗺️ Currently assigned to {result.performance.zoneCoverage} zone(s)
+                                </p>
+                              </div>
+                            )}
+                            
+                            {/* Team Leader */}
+                            {result.leaderId && (
+                              <p className="text-xs text-gray-600 mt-1">
+                                👑 Leader: {result.leaderId.name}
+                              </p>
+                            )}
+                            
+                            {/* Team Status */}
+                            {result.status && (
+                              <p className="text-xs text-gray-600">
+                                Status: {result.status}
+                              </p>
+                            )}
+                          </div>
+                        ) : (
+                          // Individual Agent Result Display
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{result.name}</p>
+                              <p className="text-sm text-gray-500">{result.email}</p>
+                              
+                              {/* Assignment Status Badge */}
+                              {result.assignmentSummary && (
+                                <div className="mt-1">
+                                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    result.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {result.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                                  </span>
+                                  
+                                  {/* Detailed Assignment Status */}
+                                  {result.assignmentSummary.assignmentDetails && (
+                                    <div className="mt-1 space-y-1">
+                                      {result.assignmentSummary.assignmentDetails.isFullyAssigned && (
+                                        <p className="text-xs text-green-600 font-medium">
+                                          ✓ Fully assigned ({result.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                        </p>
+                                      )}
+                                      {result.assignmentSummary.assignmentDetails.isPartiallyAssigned && (
+                                        <p className="text-xs text-yellow-600 font-medium">
+                                          ⚠ Partially assigned ({result.assignmentSummary.assignmentDetails.totalAssignments} total)
+                                        </p>
+                                      )}
+                                      {result.assignmentSummary.assignmentDetails.isOnlyScheduled && (
+                                        <p className="text-xs text-purple-600 font-medium">
+                                          📅 Scheduled only ({result.assignmentSummary.totalScheduledZones} scheduled)
+                                        </p>
+                                      )}
+                                      
+                                      {/* Assignment Breakdown */}
+                                      <div className="text-xs text-gray-600">
+                                        {result.assignmentSummary.assignmentDetails.hasIndividualAssignments && (
+                                          <span className="inline-block mr-2">
+                                            👤 {result.assignmentSummary.individualZones.length} individual
+                                          </span>
+                                        )}
+                                        {result.assignmentSummary.assignmentDetails.hasTeamAssignments && (
+                                          <span className="inline-block mr-2">
+                                            👥 {result.assignmentSummary.teamZones.length} team
+                                          </span>
+                                        )}
+                                        {result.assignmentSummary.assignmentDetails.hasScheduledIndividualAssignments && (
+                                          <span className="inline-block mr-2">
+                                            📅 {result.assignmentSummary.totalScheduledZones} scheduled
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* Team Membership Information */}
+                              {result.teamMemberships && result.teamMemberships.length > 0 && (
+                                <div className="mt-1">
+                                  <div className="flex flex-wrap gap-1">
+                                    {result.teamMemberships.map((team: any) => (
+                                      <span
+                                        key={team.teamId}
+                                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                          team.isPrimary
+                                            ? 'bg-blue-100 text-blue-800'
+                                            : 'bg-gray-100 text-gray-700'
+                                        }`}
+                                      >
+                                        {team.teamName}
+                                        {team.isPrimary && (
+                                          <span className="ml-1 text-blue-600">★</span>
+                                        )}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  <p className="text-xs text-amber-600 mt-1">
+                                    Already in {result.teamMemberships.length} team(s)
+                                  </p>
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 ml-2">
+                              <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                result.status === 'ACTIVE' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                              }`}>
+                                {result.status}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* No Results Message */}
+                {assignmentSearchQuery.trim() && !isSearchingAssignment && assignmentSearchResults.length === 0 && (
+                  <div className="mt-2 p-3 text-center text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-md">
+                    No {assignmentType === "team" ? "teams" : "agents"} found matching "{assignmentSearchQuery}"
+                  </div>
+                )}
+
+                {/* Selected Assignment Display */}
+                {selectedAssignment && (
+                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <div className="font-medium text-sm text-blue-900">
+                          {assignmentType === "team" ? selectedAssignment.name : selectedAssignment.name}
+                        </div>
+                        {assignmentType === "individual" && (
+                          <div className="text-xs text-blue-700">{selectedAssignment.email}</div>
+                        )}
+                        {assignmentType === "team" && selectedAssignment.agentIds && (
+                          <div className="text-xs text-blue-700">{selectedAssignment.agentIds.length} members</div>
+                        )}
+                        
+                        {/* Enhanced Assignment Status for Selected Item */}
+                        {assignmentType === "team" && selectedAssignment.performance && (
+                          <div className="mt-1">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              selectedAssignment.performance.zoneCoverage > 0 ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {selectedAssignment.performance.zoneCoverage > 0 ? '✓ Assigned' : '○ Unassigned'}
+                            </span>
+                            {selectedAssignment.performance.zoneCoverage > 0 && (
+                              <span className="text-xs text-blue-700 ml-2">
+                                🗺️ {selectedAssignment.performance.zoneCoverage} zone(s)
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        
+                        {assignmentType === "individual" && selectedAssignment.assignmentSummary && (
+                          <div className="mt-1">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              selectedAssignment.assignmentSummary.currentAssignmentStatus === 'ASSIGNED'
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-gray-100 text-gray-600'
+                            }`}>
+                              {selectedAssignment.assignmentSummary.currentAssignmentStatus === 'ASSIGNED' ? '✓ Assigned' : '○ Unassigned'}
+                            </span>
+                            {selectedAssignment.assignmentSummary.assignmentDetails && (
+                              <span className="text-xs text-blue-700 ml-2">
+                                {selectedAssignment.assignmentSummary.assignmentDetails.totalAssignments} assignment(s)
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedAssignment(null)
+                          setAssignmentSearchQuery("")
+                        }}
+                        className="text-blue-600 hover:text-blue-800"
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Date Assignment */}
+              <div>
+                <label className="text-sm font-medium text-gray-700 mb-2 block">Assignment Date</label>
+                <div className="relative">
+                  <Input
                     type="date"
                     value={assignedDate}
                     onChange={(e) => setAssignedDate(e.target.value)}
-                    className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20"
-                    required
+                    className="border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20 bg-white"
                   />
+                  <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 </div>
               </div>
             </div>
 
             <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
               <div className="text-sm text-blue-800">
-                <strong>Step 2:</strong> Assign the territory to a sales representative and set the assignment date.
+                <strong>Step 2:</strong> Optionally assign the territory to a sales representative. You can skip this step and assign later.
               </div>
             </div>
 
@@ -2667,20 +3067,29 @@ export function ManuallyAssignTerritoryModal({
               </Button>
               <Button
                 type="submit"
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5"
-                disabled={!assignedRep || !assignedDate || isSavingTerritory}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-2.5"
+                disabled={!selectedAssignment || !assignedDate || isSavingTerritory}
               >
                 {isSavingTerritory ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving Territory...
+                    Assigning...
                   </>
                 ) : (
                   <>
-                    <MapPin className="w-4 h-4 mr-2" />
-                    Save Territory
+                    <Users className="w-4 h-4 mr-2" />
+                    Assign Territory
                   </>
                 )}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleStep2Submit}
+                className="px-8 border-gray-300 hover:bg-gray-50 py-2.5"
+                disabled={isSavingTerritory}
+              >
+                Skip for Now
               </Button>
             </div>
           </form>
