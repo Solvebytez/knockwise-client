@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Loader2, MapPin, Users, User, Building, CheckCircle, AlertCircle, Map, Calendar } from "lucide-react"
+import * as turf from '@turf/turf'
 import { apiInstance } from "@/lib/apiInstance"
 import { toast } from "sonner"
 import { 
@@ -17,6 +18,19 @@ import {
   getStreetsInNeighbourhoodByName,
   getStreetsInNeighbourhoodGoogle
 } from '@/utils/osm'
+import { osmService, RESIDENTIAL_BUILDING_TYPES, type BuildingFootprint, type OSMBuilding } from '@/lib/osmService'
+import { overpassService, type OverpassStreet } from '@/lib/overpassService'
+import type { ResidentialBuildingType } from '@/types/osm'
+import { GoogleMap, Marker, Polygon, useJsApiLoader } from '@react-google-maps/api'
+
+const libraries: ("drawing" | "geometry" | "places")[] = ["drawing", "geometry", "places"]
+
+// Extend Window interface for areaSearchTimeout
+declare global {
+  interface Window {
+    areaSearchTimeout?: NodeJS.Timeout
+  }
+}
 
 interface PlaceSuggestion {
   place_id: string
@@ -54,11 +68,16 @@ export function ManuallyAssignTerritoryModal({
   onClose, 
   onTerritorySaved 
 }: ManuallyAssignTerritoryModalProps) {
+  
+  const { isLoaded: isGoogleMapsApiLoaded } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '',
+    libraries: libraries
+  })
   // Form state
   const [formStep, setFormStep] = useState(1)
   const [territoryName, setTerritoryName] = useState("")
-  const [selectedCity, setSelectedCity] = useState("")
-  const [selectedNeighbourhood, setSelectedNeighbourhood] = useState("")
+
   const [selectedStreets, setSelectedStreets] = useState<string[]>([])
   const [territoryDescription, setTerritoryDescription] = useState("")
   const [streetInputValue, setStreetInputValue] = useState("")
@@ -66,11 +85,7 @@ export function ManuallyAssignTerritoryModal({
   const [assignedDate, setAssignedDate] = useState("")
 
   // Google Places state
-  const [citySuggestions, setCitySuggestions] = useState<PlaceSuggestion[]>([])
-  const [neighbourhoodSuggestions, setNeighbourhoodSuggestions] = useState<PlaceSuggestion[]>([])
   const [streetSuggestions, setStreetSuggestions] = useState<PlaceSuggestion[]>([])
-  const [showCitySuggestions, setShowCitySuggestions] = useState(false)
-  const [showNeighbourhoodSuggestions, setShowNeighbourhoodSuggestions] = useState(false)
   const [showStreetSuggestions, setShowStreetSuggestions] = useState(false)
   const [showResultsPanel, setShowResultsPanel] = useState(false)
   const [activeSearchField, setActiveSearchField] = useState<string>("")
@@ -78,7 +93,7 @@ export function ManuallyAssignTerritoryModal({
   // Processing state
   const [isDetectingResidents, setIsDetectingResidents] = useState(false)
   const [isSavingTerritory, setIsSavingTerritory] = useState(false)
-  const [isLoadingNeighbourhoods, setIsLoadingNeighbourhoods] = useState(false)
+  const [isAssigningTerritory, setIsAssigningTerritory] = useState(false)
   const [isLoadingStreets, setIsLoadingStreets] = useState(false)
   const [noStreetsFound, setNoStreetsFound] = useState(false)
   const [detectedResidents, setDetectedResidents] = useState<DetectedResident[]>([])
@@ -92,6 +107,59 @@ export function ManuallyAssignTerritoryModal({
   // Google Places services
   const [autocompleteService, setAutocompleteService] = useState<any>(null)
   const [placesService, setPlacesService] = useState<any>(null)
+  const [geocoder, setGeocoder] = useState<any>(null)
+
+  // Enhanced detection settings state variables
+  const [searchRadius, setSearchRadius] = useState<number>(300)
+  const [maxDistanceFromStreet, setMaxDistanceFromStreet] = useState<number>(1.0)
+  const [buildingTypeFilter, setBuildingTypeFilter] = useState<string>("residential")
+  const [addressValidationLevel, setAddressValidationLevel] = useState<string>("strict")
+  const [coordinatePrecision, setCoordinatePrecision] = useState<string>("medium")
+
+  // Geographic hierarchy state variables
+  const [selectedArea, setSelectedArea] = useState<string>("")
+  const [selectedMunicipality, setSelectedMunicipality] = useState<string>("")
+  const [selectedCommunity, setSelectedCommunity] = useState<string>("")
+  const [areaInputValue, setAreaInputValue] = useState<string>("")
+  const [municipalityInputValue, setMunicipalityInputValue] = useState<string>("")
+  const [communityInputValue, setCommunityInputValue] = useState<string>("")
+  const [areaSuggestions, setAreaSuggestions] = useState<any[]>([])
+  const [municipalitySuggestions, setMunicipalitySuggestions] = useState<any[]>([])
+  const [communitySuggestions, setCommunitySuggestions] = useState<any[]>([])
+  const [isSettingAreaProgrammatically, setIsSettingAreaProgrammatically] = useState(false)
+  const [isLoadingAreas, setIsLoadingAreas] = useState<boolean>(false)
+  const [isLoadingMunicipalities, setIsLoadingMunicipalities] = useState<boolean>(false)
+  const [isLoadingCommunities, setIsLoadingCommunities] = useState<boolean>(false)
+  const [cachedMunicipalities, setCachedMunicipalities] = useState<any[]>([]) // Cache for auto-loaded municipalities
+  const [cachedCommunities, setCachedCommunities] = useState<any[]>([]) // Cache for auto-loaded communities
+  const [cachedStreets, setCachedStreets] = useState<any[]>([]) // Cache for auto-loaded streets
+
+  // Refs for click-outside detection
+  const areaDropdownRef = useRef<HTMLDivElement>(null)
+  const municipalityDropdownRef = useRef<HTMLDivElement>(null)
+  const communityDropdownRef = useRef<HTMLDivElement>(null)
+
+  // Click-outside handler for all dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      
+      if (areaDropdownRef.current && !areaDropdownRef.current.contains(target)) {
+        setAreaSuggestions([])
+      }
+      if (municipalityDropdownRef.current && !municipalityDropdownRef.current.contains(target)) {
+        setMunicipalitySuggestions([])
+      }
+      if (communityDropdownRef.current && !communityDropdownRef.current.contains(target)) {
+        setCommunitySuggestions([])
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [])
 
   // Add new state variables for assignment functionality
   const [assignmentType, setAssignmentType] = useState<"team" | "individual">("team")
@@ -99,6 +167,7 @@ export function ManuallyAssignTerritoryModal({
   const [assignmentSearchResults, setAssignmentSearchResults] = useState<any[]>([])
   const [isSearchingAssignment, setIsSearchingAssignment] = useState(false)
   const [selectedAssignment, setSelectedAssignment] = useState<any>(null)
+  const [savedTerritoryId, setSavedTerritoryId] = useState<string | null>(null)
 
   // Initialize Google Places services when Google Maps is available
   useEffect(() => {
@@ -115,6 +184,36 @@ export function ManuallyAssignTerritoryModal({
 
     checkGoogleMaps()
   }, [])
+
+  // Initialize geocoder service when Google Maps is loaded
+  useEffect(() => {
+    if (isGoogleMapsApiLoaded && window.google?.maps) {
+      setGeocoder(new window.google.maps.Geocoder())
+    }
+  }, [isGoogleMapsApiLoaded])
+
+  // Monitor detection settings for safety checks
+  useEffect(() => {
+    console.log('🔧 Detection Settings Updated:', {
+      searchRadius,
+      maxDistanceFromStreet,
+      buildingTypeFilter,
+      addressValidationLevel,
+      coordinatePrecision
+    })
+  }, [searchRadius, maxDistanceFromStreet, buildingTypeFilter, addressValidationLevel, coordinatePrecision])
+
+  // Safety check for NaN values in detection settings
+  useEffect(() => {
+    if (isNaN(searchRadius)) {
+      console.warn('⚠️ searchRadius is NaN, resetting to 300')
+      setSearchRadius(300)
+    }
+    if (isNaN(maxDistanceFromStreet)) {
+      console.warn('⚠️ maxDistanceFromStreet is NaN, resetting to 1.0')
+      setMaxDistanceFromStreet(1.0)
+    }
+  }, [searchRadius, maxDistanceFromStreet])
 
   // Add fetch functions for teams and agents
   const fetchAgents = useCallback(async (): Promise<any[]> => {
@@ -171,135 +270,586 @@ export function ManuallyAssignTerritoryModal({
     }
   }, [fetchAgents, fetchTeams])
 
-  // Search cities
-  const searchCities = useCallback(async (query: string) => {
-    if (!autocompleteService || query.length < 2) {
-      setCitySuggestions([])
-      setShowCitySuggestions(false)
+  // Add state to track if search is triggered by selection
+  const [isSelectionUpdate, setIsSelectionUpdate] = useState(false)
+
+  // Geographic hierarchy search functions
+  const searchAreas = useCallback(async (query: string) => {
+    console.log('🔍 searchAreas called with:', query)
+    if (query.length < 2) {
+      console.log('Query too short, clearing suggestions')
+      setAreaSuggestions([])
       return
     }
 
-    try {
-      const request = {
-        input: query,
-        types: ['(cities)'],
-        componentRestrictions: { country: 'ca' } // Canada
-      }
-
-      autocompleteService.getPlacePredictions(request, (predictions: PlaceSuggestion[], status: any) => {
-        if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-          setCitySuggestions(predictions.slice(0, 5))
-          setShowCitySuggestions(true)
-        } else {
-          setCitySuggestions([])
-          setShowCitySuggestions(false)
-        }
-      })
-    } catch (error) {
-      console.error('Error searching cities:', error)
-      setCitySuggestions([])
-      setShowCitySuggestions(false)
-    }
-  }, [autocompleteService])
-
-  // Search neighbourhoods using OpenStreetMap (OSM)
-  const searchNeighbourhoods = useCallback(async (query: string) => {
-    console.log('searchNeighbourhoods called with:', query)
-    console.log('selectedCity:', selectedCity)
+    setIsLoadingAreas(true)
+    console.log('🌐 Making OSM API call for areas...')
     
-    if (!query.trim()) {
-      console.log('Search conditions not met - query:', query)
-      // If we have existing suggestions, show them all
-      if (neighbourhoodSuggestions.length > 0) {
-        setShowNeighbourhoodSuggestions(true)
-      } else {
-        setNeighbourhoodSuggestions([])
-        setShowNeighbourhoodSuggestions(false)
-      }
-      return
-    }
-
-    // If we already have neighbourhoods loaded, filter them
-    if (neighbourhoodSuggestions.length > 0) {
-      console.log('Filtering existing neighbourhoods for query:', query)
-      const filtered = neighbourhoodSuggestions.filter(suggestion => 
-        suggestion.structured_formatting.main_text.toLowerCase().includes(query.toLowerCase())
-      )
-      console.log('Filtered neighbourhoods:', filtered)
-      setNeighbourhoodSuggestions(filtered)
-      setShowNeighbourhoodSuggestions(filtered.length > 0)
-      return
-    }
-
-    // If no existing suggestions, make API call
-    setIsLoadingNeighbourhoods(true)
+    // Set a timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      console.log('Search timeout reached')
+      setIsLoadingAreas(false)
+      setAreaSuggestions([])
+    }, 10000) // 10 second timeout
+    
     try {
-      const cityOnly = selectedCity ? selectedCity.split(',')[0].trim() : ''
-      console.log('City context:', cityOnly)
+      // Clean and validate the query first
+      const cleanQuery = query.trim().toLowerCase()
+      console.log('Clean query:', cleanQuery)
       
-      // Use the new dynamic OSM utility
-      const neighbourhoods = await getCityNeighbourhoodsDynamic(cityOnly, query)
-      console.log('OSM neighbourhoods found:', neighbourhoods)
-
-      if (neighbourhoods.length > 0) {
-        // Convert to the format expected by the component
-        const formattedNeighbourhoods = neighbourhoods.map((neighbourhood) => ({
-          place_id: neighbourhood.id,
-          description: `${neighbourhood.name}, ${cityOnly}`,
-          structured_formatting: {
-            main_text: neighbourhood.name,
-            secondary_text: `${cityOnly}, Canada`
-          }
-        }))
-
-        console.log('Formatted neighbourhoods:', formattedNeighbourhoods)
-        setNeighbourhoodSuggestions(formattedNeighbourhoods.slice(0, 10))
-        setShowNeighbourhoodSuggestions(true)
-      } else {
-        // Fallback to Google Places API
-        console.log('No OSM results, using Google Places API')
-        await searchNeighbourhoodsGoogle(query)
-      }
-
-    } catch (error) {
-      console.error('Error searching neighbourhoods:', error)
-      // Fallback to Google Places API
-      console.log('OSM error, using Google Places API')
-      await searchNeighbourhoodsGoogle(query)
-    } finally {
-      setIsLoadingNeighbourhoods(false)
-    }
-  }, [selectedCity, neighbourhoodSuggestions])
-
-  // Fallback to Google Places API
-  const searchNeighbourhoodsGoogle = useCallback(async (query: string) => {
-    if (!autocompleteService) {
-      setNeighbourhoodSuggestions([])
-      setShowNeighbourhoodSuggestions(false)
-      return
-    }
-
-    try {
-      const cityOnly = selectedCity ? selectedCity.split(',')[0].trim() : ''
-      
+      // Try multiple search strategies for better results
       const searchQueries = [
-        `${cityOnly} ${query}`,
-        `${query} ${cityOnly}`,
-        query
+        `${query}, Canada`,           // Exact with Canada
+        `${query}, Ontario, Canada`,  // With Ontario and Canada
+        `${query}, ON, Canada`,       // With Ontario abbreviation and Canada
+        `${query}`,                   // Just the query
+        `${query}, Ontario`,          // With Ontario
+        `${query}, ON`                // With Ontario abbreviation
       ]
 
-      let allPredictions: PlaceSuggestion[] = []
+      let allAreas: any[] = []
 
       for (const searchQuery of searchQueries) {
         try {
-          const request = {
-            input: searchQuery,
-            types: ['sublocality', 'locality'],
-            componentRestrictions: { country: 'ca' }
+          // Ensure the search query is properly encoded
+          const encodedQuery = encodeURIComponent(searchQuery)
+          const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodedQuery}&addressdetails=1&limit=10&countrycodes=ca`
+          console.log('OSM API URL:', url)
+          
+          const response = await fetch(url)
+          console.log('OSM API response status:', response.status)
+          
+          if (!response.ok) {
+            console.log(`HTTP error: ${response.status}`)
+            continue
           }
+          
+          const data = await response.json()
+          console.log('OSM API data received:', data)
+          
+          if (!Array.isArray(data)) {
+            console.log('Invalid data format received')
+            continue
+          }
+          
+          const areas = data
+            .filter((item: any) => {
+              // Accept more types of geographic areas
+              const validTypes = ['region', 'state', 'administrative', 'city', 'town', 'village', 'hamlet', 'suburb', 'neighbourhood']
+              const validClasses = ['boundary', 'place', 'amenity']
+              
+              // Also accept items with high importance (major places)
+              const hasHighImportance = item.importance && item.importance > 0.3
+              
+              return validTypes.includes(item.type) || 
+                     validClasses.includes(item.class) || 
+                     hasHighImportance
+            })
+            .map((item: any) => ({
+              id: `area_${item.place_id}`,
+              name: item.display_name.split(',')[0],
+              fullName: item.display_name,
+              lat: parseFloat(item.lat),
+              lon: parseFloat(item.lon),
+              type: item.type,
+              class: item.class
+            }))
+          
+          console.log('Filtered areas for query:', searchQuery, areas)
+          allAreas = [...allAreas, ...areas]
+          
+          // If we found results, we can stop searching
+          if (areas.length > 0) {
+            console.log('Found results, stopping search')
+            break
+          }
+        } catch (error) {
+          console.log(`Search query "${searchQuery}" failed:`, error)
+          continue
+        }
+      }
 
-          const predictions = await new Promise<PlaceSuggestion[]>((resolve, reject) => {
-            autocompleteService.getPlacePredictions(request, (predictions: PlaceSuggestion[], status: any) => {
+      // Remove duplicates
+      const uniqueAreas = allAreas.filter((area, index, self) => 
+        index === self.findIndex(a => a.id === area.id)
+      )
+
+
+      
+      console.log('Final areas:', uniqueAreas)
+      setAreaSuggestions(uniqueAreas.slice(0, 10))
+    } catch (error) {
+      console.error('Error searching areas:', error)
+      setAreaSuggestions([])
+    } finally {
+      clearTimeout(timeoutId)
+      setIsLoadingAreas(false)
+    }
+  }, [])
+
+  const searchMunicipalities = useCallback(async (query: string) => {
+    if (!selectedArea || query.length < 2) {
+      setMunicipalitySuggestions([])
+      return
+    }
+
+    setIsLoadingMunicipalities(true)
+    console.log('🔍 Manual search for municipalities:', query, 'in area:', selectedArea)
+    
+    try {
+      // For Toronto, search within the auto-loaded municipalities
+      if (selectedArea.toLowerCase().includes('toronto')) {
+        // Get the auto-loaded municipalities and filter them
+        const searchQueries = [
+          `${query}, Toronto, Ontario, Canada`,
+          `${query}, ${selectedArea}, Canada`,
+          `${query}, Canada`
+        ]
+
+        let allMunicipalities: any[] = []
+
+        for (const searchQuery of searchQueries) {
+          try {
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&addressdetails=1&limit=5&countrycodes=ca`
+            console.log('Municipality search URL:', url)
+            
+            const response = await fetch(url)
+            if (!response.ok) continue
+            
+            const data = await response.json()
+            if (!Array.isArray(data)) continue
+            
+            const municipalities = data
+              .filter((item: any) => {
+                const validTypes = ['suburb', 'neighbourhood', 'city', 'town', 'administrative']
+                const validClasses = ['place', 'boundary']
+                const hasHighImportance = item.importance && item.importance > 0.1
+                
+                return validTypes.includes(item.type) || 
+                       validClasses.includes(item.class) || 
+                       hasHighImportance
+              })
+              .map((item: any) => ({
+                id: `municipality_${item.place_id}`,
+                name: item.display_name.split(',')[0],
+                fullName: item.display_name,
+                lat: parseFloat(item.lat),
+                lon: parseFloat(item.lon),
+                type: item.type,
+                class: item.class
+              }))
+            
+            allMunicipalities = [...allMunicipalities, ...municipalities]
+            
+            if (municipalities.length > 0) {
+              console.log('Found municipalities, stopping search')
+              break
+            }
+          } catch (error) {
+            console.log(`Municipality search query "${searchQuery}" failed:`, error)
+            continue
+          }
+        }
+
+        // Remove duplicates and sort by name
+        const uniqueMunicipalities = allMunicipalities
+          .filter((municipality, index, self) => 
+            index === self.findIndex(m => m.id === municipality.id)
+          )
+          .sort((a, b) => a.name.localeCompare(b.name))
+
+        console.log('Manual search results:', uniqueMunicipalities)
+        setMunicipalitySuggestions(uniqueMunicipalities.slice(0, 15))
+        return
+      }
+
+      // For other areas, use the original search logic
+      const areaQuery = `${query}, ${selectedArea}`
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(areaQuery)}&addressdetails=1&limit=10&countrycodes=ca`
+      )
+      const data = await response.json()
+      
+      const municipalities = data
+        .filter((item: any) => item.type === 'city' || item.type === 'town')
+        .map((item: any) => ({
+          id: `municipality_${item.place_id}`,
+          name: item.display_name.split(',')[0],
+          fullName: item.display_name,
+          lat: parseFloat(item.lat),
+          lon: parseFloat(item.lon),
+          type: item.type
+        }))
+      
+      setMunicipalitySuggestions(municipalities)
+    } catch (error) {
+      console.error('Error searching municipalities:', error)
+      setMunicipalitySuggestions([])
+    } finally {
+      setIsLoadingMunicipalities(false)
+    }
+  }, [selectedArea])
+
+  const searchCommunities = useCallback(async (query: string) => {
+    if (!selectedMunicipality || query.length < 2) {
+      setCommunitySuggestions([])
+      return
+    }
+
+    setIsLoadingCommunities(true)
+    try {
+      // Use OSM Nominatim for community/neighbourhood search within the selected municipality
+      const communityQuery = `${query}, ${selectedMunicipality}`
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(communityQuery)}&addressdetails=1&limit=10&featuretype=suburb`
+      )
+      const data = await response.json()
+      
+      const communities = data
+        .filter((item: any) => item.type === 'suburb' || item.type === 'neighbourhood')
+        .map((item: any) => ({
+          id: `community_${item.place_id}`,
+          name: item.display_name.split(',')[0],
+          fullName: item.display_name,
+          lat: parseFloat(item.lat),
+          lon: parseFloat(item.lon),
+          type: item.type
+        }))
+      
+      setCommunitySuggestions(communities)
+    } catch (error) {
+      console.error('Error searching communities:', error)
+      setCommunitySuggestions([])
+    } finally {
+      setIsLoadingCommunities(false)
+    }
+  }, [selectedMunicipality])
+
+  const searchMapArts = useCallback(async (query: string) => {
+    if (!selectedCommunity || query.length < 2) {
+      setMapArtSuggestions([])
+      return
+    }
+
+    setIsLoadingMapArts(true)
+    try {
+      // Use OSM Nominatim for MapArt/neighbourhood subdivision search within the selected community
+      const mapArtQuery = `${query}, ${selectedCommunity}, ${selectedMunicipality}`
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(mapArtQuery)}&addressdetails=1&limit=10&featuretype=neighbourhood`
+      )
+      const data = await response.json()
+      
+      const mapArts = data
+        .filter((item: any) => item.type === 'neighbourhood' || item.type === 'suburb')
+        .map((item: any) => ({
+          id: `mapart_${item.place_id}`,
+          name: item.display_name.split(',')[0],
+          fullName: item.display_name,
+          lat: parseFloat(item.lat),
+          lon: parseFloat(item.lon),
+          type: item.type
+        }))
+      
+      setMapArtSuggestions(mapArts)
+    } catch (error) {
+      console.error('Error searching MapArts:', error)
+      setMapArtSuggestions([])
+    } finally {
+      setIsLoadingMapArts(false)
+    }
+  }, [selectedCommunity, selectedMunicipality])
+
+  // Auto-load municipalities when area is selected
+  const loadMunicipalitiesForArea = useCallback(async (areaName: string) => {
+    if (!areaName) {
+      setMunicipalitySuggestions([])
+      return
+    }
+
+    setIsLoadingMunicipalities(true)
+    console.log('🔄 Auto-loading municipalities for area:', areaName)
+    
+    try {
+      // For Toronto, use specific community searches
+      if (areaName.toLowerCase().includes('toronto')) {
+        const torontoCommunities = [
+          'Downtown Toronto', 'North York', 'Scarborough', 'Etobicoke', 'East York', 'York',
+          'Rexdale', 'Malvern', 'Guildwood', 'Downsview', 'Jane and Finch', 'Islington',
+          'Centennial Park', 'Royal Ontario Museum', 'Scarborough Bluffs', 'Union',
+          'Toronto Zoo', 'East York', 'Weston', 'Parkdale', 'High Park', 'The Beaches',
+          'Leslieville', 'Cabbagetown', 'Chinatown', 'Kensington Market', 'Queen West',
+          'King West', 'Entertainment District', 'Financial District', 'Harbourfront',
+          'Distillery District', 'St. Lawrence Market', 'Old Toronto', 'Midtown',
+          'Yonge and Eglinton', 'Davisville', 'Leaside', 'Thornhill', 'Markham',
+          'Richmond Hill', 'Vaughan', 'Mississauga', 'Brampton', 'Pickering',
+          'Ajax', 'Whitby', 'Oshawa'
+        ]
+
+        // Search for each community
+        let allMunicipalities: any[] = []
+        
+        for (const community of torontoCommunities.slice(0, 20)) { // Limit to first 20 for performance
+          try {
+            const searchQuery = `${community}, Toronto, Ontario, Canada`
+            const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&addressdetails=1&limit=3&countrycodes=ca`
+            
+            const response = await fetch(url)
+            if (!response.ok) continue
+            
+            const data = await response.json()
+            if (!Array.isArray(data)) continue
+            
+            const municipalities = data
+              .filter((item: any) => {
+                const validTypes = ['suburb', 'neighbourhood', 'city', 'town', 'administrative']
+                const validClasses = ['place', 'boundary']
+                const hasHighImportance = item.importance && item.importance > 0.1
+                
+                return validTypes.includes(item.type) || 
+                       validClasses.includes(item.class) || 
+                       hasHighImportance
+              })
+              .map((item: any) => ({
+                id: `municipality_${item.place_id}`,
+                name: item.display_name.split(',')[0],
+                fullName: item.display_name,
+                lat: parseFloat(item.lat),
+                lon: parseFloat(item.lon),
+                type: item.type,
+                class: item.class
+              }))
+            
+            allMunicipalities = [...allMunicipalities, ...municipalities]
+          } catch (error) {
+            console.log(`Community search "${community}" failed:`, error)
+            continue
+          }
+        }
+
+        // Remove duplicates and sort by name
+        const uniqueMunicipalities = allMunicipalities
+          .filter((municipality, index, self) => 
+            index === self.findIndex(m => m.id === municipality.id)
+          )
+          .sort((a, b) => a.name.localeCompare(b.name))
+
+        console.log('Auto-loaded Toronto municipalities:', uniqueMunicipalities)
+        const finalMunicipalities = uniqueMunicipalities.slice(0, 25)
+        setMunicipalitySuggestions(finalMunicipalities)
+        setCachedMunicipalities(finalMunicipalities) // Cache the results
+        return
+      }
+
+      // For other areas, use the original search logic
+      const searchQueries = [
+        `municipalities in ${areaName}, Canada`,
+        `cities in ${areaName}, Canada`,
+        `${areaName}, Canada`,
+        `municipalities ${areaName}`,
+        `cities ${areaName}`
+      ]
+
+      let allMunicipalities: any[] = []
+
+      for (const searchQuery of searchQueries) {
+        try {
+          const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&addressdetails=1&limit=10&countrycodes=ca`
+          console.log('Municipality search URL:', url)
+          
+          const response = await fetch(url)
+          if (!response.ok) continue
+          
+          const data = await response.json()
+          if (!Array.isArray(data)) continue
+          
+          const municipalities = data
+            .filter((item: any) => {
+              const validTypes = ['city', 'town', 'municipality', 'administrative', 'suburb']
+              const validClasses = ['place', 'boundary']
+              const hasHighImportance = item.importance && item.importance > 0.2
+              
+              return validTypes.includes(item.type) || 
+                     validClasses.includes(item.class) || 
+                     hasHighImportance
+            })
+            .map((item: any) => ({
+              id: `municipality_${item.place_id}`,
+              name: item.display_name.split(',')[0],
+              fullName: item.display_name,
+              lat: parseFloat(item.lat),
+              lon: parseFloat(item.lon),
+              type: item.type,
+              class: item.class
+            }))
+          
+          allMunicipalities = [...allMunicipalities, ...municipalities]
+          
+          if (municipalities.length > 0) {
+            console.log('Found municipalities, stopping search')
+            break
+          }
+        } catch (error) {
+          console.log(`Municipality search query "${searchQuery}" failed:`, error)
+          continue
+        }
+      }
+
+      // Remove duplicates
+      const uniqueMunicipalities = allMunicipalities.filter((municipality, index, self) => 
+        index === self.findIndex(m => m.id === municipality.id)
+      )
+
+      console.log('Auto-loaded municipalities:', uniqueMunicipalities)
+      setMunicipalitySuggestions(uniqueMunicipalities.slice(0, 15))
+    } catch (error) {
+      console.error('Error auto-loading municipalities:', error)
+      setMunicipalitySuggestions([])
+    } finally {
+      setIsLoadingMunicipalities(false)
+    }
+  }, [])
+
+  // Auto-load communities when municipality is selected
+  const loadCommunitiesForMunicipality = useCallback(async (municipalityName: string, areaName: string) => {
+    if (!municipalityName || !areaName) {
+      setCommunitySuggestions([])
+      return
+    }
+
+    setIsLoadingCommunities(true)
+    console.log('🔄 Auto-loading communities for municipality:', municipalityName, 'in area:', areaName)
+    
+    try {
+      // Search for communities within the selected municipality
+      const searchQueries = [
+        `communities in ${municipalityName}, ${areaName}, Canada`,
+        `neighbourhoods in ${municipalityName}, ${areaName}, Canada`,
+        `${municipalityName}, ${areaName}, Canada`,
+        `communities ${municipalityName}`,
+        `neighbourhoods ${municipalityName}`
+      ]
+
+      let allCommunities: any[] = []
+
+      for (const searchQuery of searchQueries) {
+        try {
+          const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&addressdetails=1&limit=10&countrycodes=ca`
+          console.log('Community search URL:', url)
+          
+          const response = await fetch(url)
+          if (!response.ok) continue
+          
+          const data = await response.json()
+          if (!Array.isArray(data)) continue
+          
+          const communities = data
+            .filter((item: any) => {
+              const validTypes = ['suburb', 'neighbourhood', 'quarter', 'administrative']
+              const validClasses = ['place', 'boundary']
+              const hasHighImportance = item.importance && item.importance > 0.1
+              
+              return validTypes.includes(item.type) || 
+                     validClasses.includes(item.class) || 
+                     hasHighImportance
+            })
+            .map((item: any) => ({
+              id: `community_${item.place_id}`,
+              name: item.display_name.split(',')[0],
+              fullName: item.display_name,
+              lat: parseFloat(item.lat),
+              lon: parseFloat(item.lon),
+              type: item.type,
+              class: item.class
+            }))
+          
+          allCommunities = [...allCommunities, ...communities]
+          
+          if (communities.length > 0) {
+            console.log('Found communities, stopping search')
+            break
+          }
+        } catch (error) {
+          console.log(`Community search query "${searchQuery}" failed:`, error)
+          continue
+        }
+      }
+
+      // Remove duplicates and sort by name
+      const uniqueCommunities = allCommunities
+        .filter((community, index, self) => 
+          index === self.findIndex(c => c.id === community.id)
+        )
+        .sort((a, b) => a.name.localeCompare(b.name))
+
+      console.log('Auto-loaded communities:', uniqueCommunities)
+      const finalCommunities = uniqueCommunities.slice(0, 20)
+      setCommunitySuggestions(finalCommunities)
+      setCachedCommunities(finalCommunities) // Cache the results
+    } catch (error) {
+      console.error('Error auto-loading communities:', error)
+      setCommunitySuggestions([])
+    } finally {
+      setIsLoadingCommunities(false)
+    }
+  }, [])
+
+
+
+
+
+
+
+  // Auto-load residential streets at Community level using Overpass API
+  const loadStreetsForCommunity = useCallback(async (communityName: string, municipalityName: string, areaName: string) => {
+    if (!communityName || !municipalityName || !areaName) {
+      setStreetSuggestions([])
+      return
+    }
+
+    setIsLoadingStreets(true)
+    console.log('🔄 Overpass API: Auto-loading residential streets for community:', communityName, 'in municipality:', municipalityName, 'area:', areaName)
+    
+    try {
+      // Primary: Use Overpass API to get residential streets
+      const overpassStreets = await overpassService.fetchResidentialStreets(communityName, municipalityName, areaName)
+      
+      if (overpassStreets.length > 0) {
+        // Convert OverpassStreet format to Google Places format for consistency
+        const formattedStreets = overpassStreets.map(street => ({
+          place_id: `overpass_${street.id}`,
+          description: `${street.name}, ${communityName}, ${municipalityName}, ${areaName}, Canada`,
+          structured_formatting: {
+            main_text: street.name,
+            secondary_text: `${communityName}, ${municipalityName}`
+          },
+          lat: street.lat,
+          lng: street.lng,
+          type: street.type
+        }))
+        
+        console.log(`✅ Overpass API found ${formattedStreets.length} residential streets`)
+        setStreetSuggestions(formattedStreets)
+        setCachedStreets(formattedStreets)
+        setShowStreetSuggestions(true) // Show the suggestions dropdown
+        return
+      }
+
+      // Fallback 1: Google Places API if Overpass fails
+      if (autocompleteService) {
+        console.log('🔄 Overpass API failed, trying Google Places API...')
+        
+        try {
+          const googleRequest = {
+            input: `residential streets in ${communityName} ${municipalityName}`,
+            types: ['route'],
+            componentRestrictions: { country: 'ca' },
+            location: new google.maps.LatLng(43.7266659, -79.4820065), // Downsview center
+            radius: 5000 // 5km radius
+          }
+          
+          const googleResults = await new Promise<any[]>((resolve, reject) => {
+            autocompleteService.getPlacePredictions(googleRequest, (predictions: any[], status: any) => {
               if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
                 resolve(predictions)
               } else {
@@ -307,44 +857,497 @@ export function ManuallyAssignTerritoryModal({
               }
             })
           })
-
-          if (predictions && predictions.length > 0) {
-            allPredictions = [...allPredictions, ...predictions]
+          
+          const googleStreets = googleResults
+            .filter(prediction => prediction.description.toLowerCase().includes('toronto'))
+            .slice(0, 20)
+          
+          if (googleStreets.length > 0) {
+            setStreetSuggestions(googleStreets)
+            setCachedStreets(googleStreets)
+            setShowStreetSuggestions(true) // Show the suggestions dropdown
+            console.log(`✅ Google Places fallback found ${googleStreets.length} streets`)
+            return
           }
         } catch (error) {
-          console.log(`Google Places API query "${searchQuery}" failed:`, error)
+          console.error('Google Places fallback failed:', error)
+        }
+      }
+
+      // Fallback 2: Known Streets for Downsview area
+      console.log('🔄 All APIs failed, using known streets fallback...')
+      const knownDownsviewStreets = [
+        'Wilson Avenue', 'Keele Street', 'Jane Street', 'Bathurst Street',
+        'Allen Road', 'Dufferin Street', 'Carl Hall Road', 'Sheppard Avenue West',
+        'Wilson Heights Boulevard', 'Vitti Street', 'Billy Bishop Way'
+      ].map(street => ({
+        place_id: `fallback_${street.replace(/\s+/g, '_').toLowerCase()}`,
+        description: `${street}, ${communityName}, ${municipalityName}, ${areaName}, Canada`,
+        structured_formatting: {
+          main_text: street,
+          secondary_text: `${communityName}, ${municipalityName}`
+        }
+      }))
+      
+      setStreetSuggestions(knownDownsviewStreets)
+      setCachedStreets(knownDownsviewStreets)
+      setShowStreetSuggestions(true) // Show the suggestions dropdown
+      console.log(`✅ Known streets fallback found ${knownDownsviewStreets.length} streets`)
+      
+    } catch (error) {
+      console.error('Error auto-loading residential streets at community level:', error)
+      setStreetSuggestions([])
+    } finally {
+      setIsLoadingStreets(false)
+    }
+  }, [])
+
+  // Function to get community bounding box dynamically from OSM
+  const getCommunityBoundingBox = useCallback(async (communityName: string): Promise<number[]> => {
+    console.log('🗺️ Fetching dynamic bounding box for community:', communityName)
+    
+    try {
+      // Try multiple OSM queries to find the community boundary
+      const queries = [
+        // Query 1: Try neighbourhood boundary
+        `
+          [out:json][timeout:15];
+          area["name"="${communityName}"]["boundary"="neighbourhood"]->.searchArea;
+          way(area.searchArea);
+          out geom;
+        `,
+        // Query 2: Try suburb boundary
+        `
+          [out:json][timeout:15];
+          area["name"="${communityName}"]["place"="suburb"]->.searchArea;
+          way(area.searchArea);
+          out geom;
+        `,
+        // Query 3: Try administrative boundary
+        `
+          [out:json][timeout:15];
+          area["name"="${communityName}"]["admin_level"="10"]->.searchArea;
+          way(area.searchArea);
+          out geom;
+        `,
+        // Query 4: Try any area with the name
+        `
+          [out:json][timeout:15];
+          area["name"="${communityName}"]->.searchArea;
+          way(area.searchArea);
+          out geom;
+        `
+      ]
+      
+      for (let i = 0; i < queries.length; i++) {
+        try {
+          console.log(`🔍 Trying OSM query ${i + 1} for ${communityName}`)
+          
+          const response = await fetch('https://overpass-api.de/api/interpreter', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: `data=${encodeURIComponent(queries[i])}`,
+            signal: AbortSignal.timeout(20000)
+          })
+          
+          if (response.ok) {
+            const data = await response.json()
+            
+            if (data.elements && data.elements.length > 0) {
+              // Calculate bounding box from community geometry
+              const allPoints: any[] = []
+              data.elements.forEach((element: any) => {
+                if (element.geometry) {
+                  element.geometry.forEach((point: any) => {
+                    allPoints.push([point.lat, point.lon])
+                  })
+                }
+              })
+              
+              if (allPoints.length > 0) {
+                const lats = allPoints.map(p => p[0])
+                const lons = allPoints.map(p => p[1])
+                const bbox = [
+                  Math.min(...lats), // south
+                  Math.min(...lons), // west
+                  Math.max(...lats), // north
+                  Math.max(...lons)  // east
+                ]
+                
+                // Add some padding to the bounding box
+                const padding = 0.01 // ~1km padding
+                bbox[0] -= padding // south
+                bbox[1] -= padding // west
+                bbox[2] += padding // north
+                bbox[3] += padding // east
+                
+                console.log(`✅ Dynamic bounding box for ${communityName} (query ${i + 1}):`, bbox)
+                return bbox
+              }
+            }
+          }
+        } catch (error) {
+          console.log(`❌ Query ${i + 1} failed for ${communityName}:`, error)
+          continue
+        }
+      }
+      
+      // If all queries fail, throw an error instead of using static fallbacks
+      throw new Error(`Could not find bounding box for community: ${communityName}`)
+      
+    } catch (error) {
+      console.error(`❌ Failed to fetch dynamic bounding box for ${communityName}:`, error)
+      throw error // Re-throw to handle in the calling function
+    }
+  }, [])
+
+  // Overpass API function to get residential buildings along a street with rate limiting
+  const getBuildingsAlongStreet = useCallback(async (streetName: string, bufferDistance: number = 100): Promise<any[]> => {
+    console.log('🏠 Overpass API: Fetching residential buildings along street:', streetName, 'with buffer:', bufferDistance, 'm')
+    
+    // Get dynamic bounding box for the selected community
+    let communityBbox: number[]
+    try {
+      communityBbox = await getCommunityBoundingBox(selectedCommunity || 'Centennial Park')
+      console.log('🗺️ Using dynamic bounding box for', selectedCommunity, ':', communityBbox)
+      console.log('🗺️ Bounding box format: [south, west, north, east]')
+    } catch (error) {
+      console.error('❌ Failed to get dynamic bounding box, cannot proceed with building detection')
+      return []
+    }
+    
+    try {
+      // Use the improved Overpass service with rate limiting
+      const { overpassService } = await import('@/lib/overpassService')
+      
+      // Update progress for user feedback
+      setDetectionProgress(`Fetching buildings from OpenStreetMap for ${streetName}...`)
+      
+      const buildings = await overpassService.fetchBuildingsAlongStreet(streetName, communityBbox)
+      
+      if (buildings.length > 0) {
+        console.log(`✅ Found ${buildings.length} residential buildings along ${streetName}`)
+        console.log('📍 Sample building coordinates:', buildings.slice(0, 3).map((b: any) => ({ lat: b.lat, lng: b.lng, address: b.street })))
+        setDetectionProgress(`Found ${buildings.length} buildings on ${streetName}`)
+        return buildings
+      } else {
+        console.log(`❌ No buildings found for street: ${streetName}`)
+        setDetectionProgress(`No buildings found on ${streetName} - trying alternative methods...`)
+        return []
+      }
+    } catch (error) {
+      console.error('❌ Overpass API error:', error)
+      setDetectionProgress(`OpenStreetMap API failed for ${streetName} - using fallback methods...`)
+      
+      // Fallback: Return empty array and let other detection methods handle it
+      return []
+    }
+  }, [selectedCommunity, getCommunityBoundingBox, setDetectionProgress])
+
+  // Initialize Overpass service and test endpoints on component mount
+  useEffect(() => {
+    const initializeOverpassService = async () => {
+      try {
+        const { overpassService } = await import('@/lib/overpassService')
+        console.log('🔧 Initializing Overpass service...')
+        
+        // Test endpoints and get working ones
+        const workingEndpoints = await overpassService.testEndpoints()
+        console.log(`✅ Overpass service initialized with ${workingEndpoints.length} working endpoints`)
+        
+        // Log current configuration
+        const config = overpassService.getConfig()
+        console.log('🔧 Current Overpass configuration:', config)
+        
+      } catch (error) {
+        console.error('❌ Failed to initialize Overpass service:', error)
+      }
+    };
+
+    initializeOverpassService();
+  }, []);
+
+  // Search streets within community hierarchy
+  const searchStreetsInCommunity = useCallback(async (query: string, community: string, municipality: string, area: string) => {
+    if (!query || query.length < 1) {
+      setStreetSuggestions([])
+      return
+    }
+
+    setIsLoadingStreets(true)
+    console.log('🔍 Searching streets in community hierarchy:', query, 'within Community:', community, 'Municipality:', municipality, 'Area:', area)
+    
+    try {
+      // Search for residential streets within the community
+      const searchQueries = [
+        `${query} residential streets in ${community}, ${municipality}, ${area}, Canada`,
+        `${query} streets in ${community}, ${municipality}, ${area}, Canada`,
+        `${query} roads in ${community}, ${municipality}, ${area}, Canada`
+      ]
+
+      let allStreets: any[] = []
+
+      for (const searchQuery of searchQueries) {
+        try {
+          const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&addressdetails=1&limit=15&countrycodes=ca`
+          console.log('Community street search URL:', url)
+          
+          const response = await fetch(url)
+          if (!response.ok) continue
+          
+          const data = await response.json()
+          if (!Array.isArray(data)) continue
+          
+          const streets = data
+            .filter((item: any) => {
+              const validTypes = ['residential', 'road', 'street', 'avenue', 'court', 'crescent', 'drive', 'lane', 'place', 'way']
+              const validClasses = ['highway', 'place']
+              const hasHighImportance = item.importance && item.importance > 0.05
+              const isResidential = item.type === 'residential' || 
+                                   (item.address && item.address.road && 
+                                    !item.address.road.toLowerCase().includes('highway') &&
+                                    !item.address.road.toLowerCase().includes('freeway'))
+              
+              return (validTypes.includes(item.type) || 
+                     validClasses.includes(item.class) || 
+                     hasHighImportance) && isResidential
+            })
+            .map((item: any) => ({
+              place_id: item.place_id,
+              description: item.display_name,
+              structured_formatting: {
+                main_text: item.display_name.split(',')[0],
+                secondary_text: `${community}, ${municipality}`
+              },
+              lat: parseFloat(item.lat),
+              lng: parseFloat(item.lon),
+              type: item.type,
+              class: item.class
+            }))
+          
+          allStreets = [...allStreets, ...streets]
+          
+          if (streets.length > 0) {
+            console.log('Found streets in community, stopping search')
+            break
+          }
+        } catch (error) {
+          console.log(`Community street search query "${searchQuery}" failed:`, error)
           continue
         }
       }
 
-      if (allPredictions.length > 0) {
-        const uniquePredictions = allPredictions.filter((prediction, index, self) => 
-          index === self.findIndex(p => p.place_id === prediction.place_id)
+      // Remove duplicates and sort by name
+      const uniqueStreets = allStreets
+        .filter((street, index, self) => 
+          index === self.findIndex(s => s.place_id === street.place_id)
         )
+        .sort((a, b) => a.structured_formatting.main_text.localeCompare(b.structured_formatting.main_text))
 
-        const filteredPredictions = uniquePredictions.filter(prediction => {
-          const description = prediction.description.toLowerCase()
-          const cityLower = selectedCity.toLowerCase()
-          return description !== cityLower
+      console.log('Community street search results:', uniqueStreets)
+      setStreetSuggestions(uniqueStreets.slice(0, 20))
+    } catch (error) {
+      console.error('Error searching streets in community:', error)
+      setStreetSuggestions([])
+    } finally {
+      setIsLoadingStreets(false)
+    }
+  }, [])
+
+  // Geographic selection handlers
+  const handleAreaSelect = useCallback((area: any) => {
+    console.log('🎯 Area selected:', area.name)
+    
+    // Clear any pending search timeout
+    if (window.areaSearchTimeout) {
+      clearTimeout(window.areaSearchTimeout)
+      window.areaSearchTimeout = undefined
+    }
+    
+    // Set flag to prevent onChange from triggering search
+    setIsSettingAreaProgrammatically(true)
+    
+    // Set the selected area and clear suggestions to close dropdown
+    setSelectedArea(area.name)
+    setAreaInputValue(area.name)
+    setAreaSuggestions([]) // This closes the dropdown
+    
+    // Clear dependent selections
+    setSelectedMunicipality("")
+    setMunicipalityInputValue("")
+    setMunicipalitySuggestions([])
+    setCachedMunicipalities([]) // Clear the cache when area changes
+    setSelectedCommunity("")
+    setCommunityInputValue("")
+    setCommunitySuggestions([])
+    
+    // Auto-load municipalities for the selected area
+    console.log('🔄 Auto-loading municipalities for area:', area.name)
+    loadMunicipalitiesForArea(area.name)
+    
+    // Reset the flag after a short delay
+    setTimeout(() => {
+      setIsSettingAreaProgrammatically(false)
+    }, 100)
+  }, [loadMunicipalitiesForArea])
+
+  const handleMunicipalitySelect = useCallback((municipality: any) => {
+    console.log('🎯 Municipality selected:', municipality.name)
+    console.log('🎯 Municipality details:', municipality)
+    
+    setSelectedMunicipality(municipality.name)
+    setMunicipalityInputValue(municipality.name)
+    setMunicipalitySuggestions([])
+    
+    // Clear dependent selections
+    setSelectedCommunity("")
+    setCommunityInputValue("")
+    setCommunitySuggestions([])
+    setCachedCommunities([]) // Clear the community cache when municipality changes
+    
+    // Auto-load communities for the selected municipality
+    console.log('🔄 Auto-loading communities for municipality:', municipality.name, 'in area:', selectedArea)
+    loadCommunitiesForMunicipality(municipality.name, selectedArea)
+    
+    // Force update the geographic hierarchy status
+    setTimeout(() => {
+      console.log('🗺️ Updated Geographic Hierarchy:')
+      console.log('  - Area:', selectedArea)
+      console.log('  - Municipality:', municipality.name)
+      console.log('  - Community:', selectedCommunity)
+    }, 100)
+  }, [selectedArea, loadCommunitiesForMunicipality, selectedCommunity])
+
+  const handleCommunitySelect = useCallback((community: any) => {
+    console.log('🎯 Community selected:', community.name)
+    console.log('🎯 Community details:', community)
+    
+    setSelectedCommunity(community.name)
+    setCommunityInputValue(community.name)
+    setCommunitySuggestions([])
+    
+    // Auto-load streets directly for the selected community
+    console.log('🔄 Auto-loading streets for community:', community.name, 'in municipality:', selectedMunicipality, 'area:', selectedArea)
+    loadStreetsForCommunity(community.name, selectedMunicipality, selectedArea)
+    
+    // Force update the geographic hierarchy status
+    setTimeout(() => {
+      console.log('🗺️ Final Geographic Hierarchy:')
+      console.log('  - Area:', selectedArea)
+      console.log('  - Municipality:', selectedMunicipality)
+      console.log('  - Community:', community.name)
+    }, 100)
+  }, [selectedMunicipality, selectedArea, loadStreetsForCommunity])
+
+
+
+  // Geographic hierarchy validation
+  const validateGeographicHierarchy = useCallback(() => {
+    const errors: string[] = []
+    const warnings: string[] = []
+
+    // Check if required levels are selected
+    if (!selectedArea) {
+      errors.push('Area/Region is required')
+    }
+    if (!selectedMunicipality) {
+      errors.push('Municipality/City is required')
+    }
+    if (!selectedCommunity) {
+      warnings.push('Community/Neighbourhood is recommended for better accuracy')
+    }
+
+    // Since data is selected through cascading hierarchy, trust the user's selection
+    // The OSM API calls ensure geographic accuracy at each level
+    if (selectedArea && selectedMunicipality) {
+      console.log('✅ Geographic hierarchy validation passed - data selected through cascading API calls')
+      // No false warnings - if OSM API returned it, it's geographically valid
+    }
+
+    return { errors, warnings }
+  }, [selectedArea, selectedMunicipality, selectedCommunity])
+
+  // Geographic boundary validation using Google Geocoding API
+  const validateGeographicContainment = useCallback(async (lat: number, lng: number, level: string) => {
+    if (!geocoder) return true
+
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        geocoder.geocode({ location: { lat, lng } }, (results: any, status: any) => {
+          if (status === window.google.maps.GeocoderStatus.OK && results.length > 0) {
+            resolve(results[0])
+              } else {
+            reject(new Error(`Geocoding failed: ${status}`))
+              }
+            })
+          })
+
+      const addressComponents = result.address_components
+      const formattedAddress = result.formatted_address
+
+      switch (level) {
+        case 'area':
+          return addressComponents.some((comp: any) => 
+            comp.types.includes('administrative_area_level_1') && 
+            comp.long_name.toLowerCase().includes(selectedArea.toLowerCase())
+          )
+        case 'municipality':
+          return addressComponents.some((comp: any) => 
+            comp.types.includes('locality') && 
+            comp.long_name.toLowerCase().includes(selectedMunicipality.toLowerCase())
+          )
+        case 'community':
+          return addressComponents.some((comp: any) => 
+            comp.types.includes('sublocality') && 
+            comp.long_name.toLowerCase().includes(selectedCommunity.toLowerCase())
+          )
+
+        default:
+          return true
+          }
+        } catch (error) {
+      console.error('Geographic containment validation failed:', error)
+      return true // Allow if validation fails
+    }
+  }, [geocoder, selectedArea, selectedMunicipality, selectedCommunity])
+
+  // Helper function for geocoding locations
+  const geocodeLocation = useCallback(async (query: string) => {
+    if (!geocoder) return null
+
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        geocoder.geocode({ address: query }, (results: any, status: any) => {
+          if (status === window.google.maps.GeocoderStatus.OK && results.length > 0) {
+            resolve(results[0])
+          } else {
+            reject(new Error(`Geocoding failed: ${status}`))
+          }
         })
-        
-        setNeighbourhoodSuggestions(filteredPredictions.slice(0, 10))
-        setShowNeighbourhoodSuggestions(true)
-      } else {
-        setNeighbourhoodSuggestions([])
-        setShowNeighbourhoodSuggestions(false)
+      })
+
+      return {
+        lat: result.geometry.location.lat(),
+        lng: result.geometry.location.lng(),
+        formattedAddress: result.formatted_address,
+        addressComponents: result.address_components
       }
     } catch (error) {
-      console.error('Error with Google Places API fallback:', error)
-      setNeighbourhoodSuggestions([])
-      setShowNeighbourhoodSuggestions(false)
+      console.error('Geocoding failed:', error)
+      return null
     }
-  }, [autocompleteService, selectedCity])
+  }, [geocoder])
+
+
+
+
 
   // Search streets
   const searchStreets = useCallback(async (query: string) => {
     console.log('searchStreets called with:', query)
-    console.log('selectedNeighbourhood:', selectedNeighbourhood)
+    console.log('Geographic context:', { selectedArea, selectedMunicipality, selectedCommunity })
     
     if (!query.trim()) {
       console.log('Search conditions not met - query:', query)
@@ -373,48 +1376,34 @@ export function ManuallyAssignTerritoryModal({
     // If no existing suggestions, make API call
     setIsLoadingStreets(true)
     try {
-      if (selectedNeighbourhood && selectedCity) {
-        const cityOnly = selectedCity.split(',')[0].trim()
-        console.log('City context for street search:', cityOnly)
+      if (selectedMunicipality) {
+        const municipalityName = selectedMunicipality.split(',')[0].trim()
+        const areaContext = selectedArea ? `${selectedArea}, ` : ''
+        const communityContext = selectedCommunity ? `${selectedCommunity}, ` : ''
         
-        // Try to get streets using the neighbourhood name
-        const streets = await getStreetsInNeighbourhoodByName(selectedNeighbourhood, cityOnly)
-        console.log('OSM streets found:', streets)
-
-        if (streets.length > 0) {
-          // Convert to the format expected by the component
-          const formattedStreets = streets.map((street) => ({
-            place_id: street.id,
-            description: `${street.name}, ${selectedNeighbourhood}`,
-            structured_formatting: {
-              main_text: street.name,
-              secondary_text: `${selectedNeighbourhood}, ${cityOnly}`
-            }
-          }))
-
-          console.log('Formatted streets:', formattedStreets)
-          setStreetSuggestions(formattedStreets.slice(0, 100))
-          setShowStreetSuggestions(true)
+        console.log('Geographic context for street search:', { municipalityName, areaContext, communityContext })
+        
+        // Try to get streets using the municipality name with geographic context
+        const searchContext = `${query} ${communityContext}${municipalityName}`
+        console.log('Search context:', searchContext)
+        
+        // Use Google Places API for street search with geographic context
+        await searchStreetsGoogle(searchContext)
         } else {
           // Fallback to Google Places API
-          console.log('No OSM results, using Google Places API')
-          await searchStreetsGoogle(query)
-        }
-      } else {
-        // Fallback to Google Places API
-        console.log('No neighbourhood selected, using Google Places API')
+        console.log('No municipality selected, using Google Places API')
         await searchStreetsGoogle(query)
       }
 
     } catch (error) {
       console.error('Error searching streets:', error)
       // Fallback to Google Places API
-      console.log('OSM error, using Google Places API')
+      console.log('Search error, using Google Places API')
       await searchStreetsGoogle(query)
     } finally {
       setIsLoadingStreets(false)
     }
-  }, [selectedNeighbourhood, selectedCity, streetSuggestions])
+  }, [selectedArea, selectedMunicipality, selectedCommunity, streetSuggestions])
 
   // Fallback to Google Places API for street search
   const searchStreetsGoogle = useCallback(async (query: string) => {
@@ -485,244 +1474,33 @@ export function ManuallyAssignTerritoryModal({
     }
   }, [autocompleteService])
 
-  // Auto-fetch neighbourhoods when city is selected
-  const autoFetchNeighbourhoods = useCallback(async (cityName: string) => {
-    if (!autocompleteService) return
 
-    setIsLoadingNeighbourhoods(true)
-    try {
-      // Extract just the city name without province/country
-      const cityOnly = cityName.split(',')[0].trim()
-      
-      // Try multiple search strategies since Google doesn't provide comprehensive neighbourhood lists
-      const searchQueries = [
-        `${cityOnly} neighbourhoods`,
-        `${cityOnly} communities`,
-        `${cityOnly} districts`,
-        `${cityOnly} areas`
-      ]
 
-      let allPredictions: PlaceSuggestion[] = []
 
-      for (const query of searchQueries) {
-        try {
-          const request = {
-            input: query,
-            types: ['sublocality', 'locality'],
-            componentRestrictions: { country: 'ca' }
-          }
 
-          const predictions = await new Promise<PlaceSuggestion[]>((resolve, reject) => {
-            autocompleteService.getPlacePredictions(request, (predictions: PlaceSuggestion[], status: any) => {
-              if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-                resolve(predictions)
-              } else {
-                resolve([]) // Don't reject, just return empty array
-              }
-            })
-          })
 
-          if (predictions && predictions.length > 0) {
-            allPredictions = [...allPredictions, ...predictions]
-          }
-        } catch (error) {
-          console.log(`Search query "${query}" failed:`, error)
-          continue
-        }
-      }
 
-      if (allPredictions.length > 0) {
-        // Remove duplicates and filter out city-level results
-        const uniquePredictions = allPredictions.filter((prediction, index, self) => 
-          index === self.findIndex(p => p.place_id === prediction.place_id)
-        )
-
-        const filteredPredictions = uniquePredictions.filter(prediction => {
-          const description = prediction.description.toLowerCase()
-          const cityLower = cityName.toLowerCase()
-          const cityOnlyLower = cityOnly.toLowerCase()
-          
-          // Exclude the city itself and province/country level results
-          return description !== cityLower &&
-                 !description.includes('canada') && 
-                 !description.includes('province') &&
-                 !description.includes(cityOnlyLower + ',') // Exclude "City, Province" format
-        })
-        
-        setNeighbourhoodSuggestions(filteredPredictions.slice(0, 15))
-        setShowNeighbourhoodSuggestions(true)
-      } else {
-        setNeighbourhoodSuggestions([])
-        setShowNeighbourhoodSuggestions(false)
-      }
-    } catch (error) {
-      console.error('Error auto-fetching neighbourhoods:', error)
-      setNeighbourhoodSuggestions([])
-      setShowNeighbourhoodSuggestions(false)
-    } finally {
-      setIsLoadingNeighbourhoods(false)
-    }
-  }, [autocompleteService])
-
-  // Auto-fetch streets when neighbourhood is selected
-  const autoFetchStreets = useCallback(async (neighbourhoodName: string) => {
-    if (!autocompleteService) return
+  // Auto-load streets when municipality is selected
+  const loadStreetsForNeighbourhood = useCallback(async (municipalityName: string) => {
+    if (!selectedMunicipality) return
 
     setIsLoadingStreets(true)
     try {
-      const request = {
-        input: `${neighbourhoodName}`,
-        types: ['route'],
-        componentRestrictions: { country: 'ca' }
-      }
-
-      const predictions = await new Promise<PlaceSuggestion[]>((resolve, reject) => {
-        autocompleteService.getPlacePredictions(request, (predictions: PlaceSuggestion[], status: any) => {
-          if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions) {
-            resolve(predictions)
-          } else {
-            reject(new Error(`Status: ${status}`))
-          }
-        })
-      })
-
-      if (predictions && predictions.length > 0) {
-        setStreetSuggestions(predictions.slice(0, 30)) // Show more street options
-        setShowStreetSuggestions(true)
-        setNoStreetsFound(false)
-      } else {
-        setStreetSuggestions([])
-        setNoStreetsFound(true)
-      }
-    } catch (error) {
-      console.error('Error auto-fetching streets:', error)
-      setStreetSuggestions([])
-      setNoStreetsFound(true)
-    } finally {
-      setIsLoadingStreets(false)
-    }
-  }, [autocompleteService])
-
-  // Auto-load neighbourhoods when city is selected
-  const loadNeighbourhoodsForCity = useCallback(async (cityName: string) => {
-    if (!cityName) {
-      setNeighbourhoodSuggestions([])
-      setShowNeighbourhoodSuggestions(false)
-      return
-    }
-
-    console.log('🔄 Auto-loading neighbourhoods for city:', cityName)
-    setIsLoadingNeighbourhoods(true)
-    
-    try {
-      const cityOnly = cityName.split(',')[0].trim()
-      console.log('City context for auto-load:', cityOnly)
+      console.log('🔄 Auto-loading streets for municipality:', municipalityName)
       
-      // Get all neighbourhoods for the city (no query filter)
-      const neighbourhoods = await getCityNeighbourhoodsDynamic(cityOnly)
-      console.log('Auto-loaded neighbourhoods:', neighbourhoods)
-
-      if (neighbourhoods.length > 0) {
-        // Convert to the format expected by the component
-        const formattedNeighbourhoods = neighbourhoods.map((neighbourhood) => ({
-          place_id: neighbourhood.id,
-          description: `${neighbourhood.name}, ${cityOnly}`,
-          structured_formatting: {
-            main_text: neighbourhood.name,
-            secondary_text: `${cityOnly}, Canada`
-          }
-        }))
-
-        console.log('Auto-formatted neighbourhoods:', formattedNeighbourhoods)
-        setNeighbourhoodSuggestions(formattedNeighbourhoods.slice(0, 10))
-        setShowNeighbourhoodSuggestions(true)
-      } else {
-        console.log('No neighbourhoods found for city, clearing suggestions')
-        setNeighbourhoodSuggestions([])
-        setShowNeighbourhoodSuggestions(false)
-      }
-
-    } catch (error) {
-      console.error('Error auto-loading neighbourhoods:', error)
-      setNeighbourhoodSuggestions([])
-      setShowNeighbourhoodSuggestions(false)
-    } finally {
-      setIsLoadingNeighbourhoods(false)
-    }
-  }, [])
-
-  // Auto-load streets when neighbourhood is selected
-  const loadStreetsForNeighbourhood = useCallback(async (neighbourhoodName: string) => {
-    if (!selectedCity) return
-
-    setIsLoadingStreets(true)
-    try {
-      console.log('🔄 Auto-loading streets for neighbourhood:', neighbourhoodName)
+      // Build geographic context for street search
+      const areaContext = selectedArea ? `${selectedArea}, ` : ''
+      const communityContext = selectedCommunity ? `${selectedCommunity}, ` : ''
       
-      // Extract just the city name without province/country
-      const cityOnly = selectedCity.split(',')[0].trim()
-      console.log('City context for street search:', cityOnly)
+      console.log('Geographic context for street search:', { areaContext, communityContext })
 
-      // Try OSM first
-      const streets = await getStreetsInNeighbourhoodByName(neighbourhoodName, cityOnly)
-      
-      if (streets.length > 0) {
-        // Convert to the format expected by the component
-        const formattedStreets = streets.map((street) => ({
-          place_id: street.id,
-          description: `${street.name}, ${neighbourhoodName}`,
-          structured_formatting: {
-            main_text: street.name,
-            secondary_text: `${neighbourhoodName}, ${cityOnly}`
-          }
-        }))
-
-        console.log('Auto-formatted streets:', formattedStreets)
-        setStreetSuggestions(formattedStreets.slice(0, 100)) // Show more streets
-        setShowStreetSuggestions(true)
-      } else {
-        console.log('No OSM streets found, trying Google Roads API...')
-        
-        // Try the comprehensive Google Roads API approach (temporarily disabled due to billing requirements)
-        console.log('🔄 Google Roads API temporarily disabled - requires billing setup')
-        console.log('📋 To enable: Go to https://console.cloud.google.com/billing and link a billing account')
-        
-        // Uncomment this section once billing is set up:
-        /*
-        try {
-          const googleStreets = await getStreetsInNeighbourhoodGoogle(neighbourhoodName, cityOnly)
-          
-          if (googleStreets.length > 0) {
-            console.log('✅ Google Roads API found streets:', googleStreets.length)
-            
-            const formattedGoogleStreets = googleStreets.map(street => ({
-              place_id: street.id,
-              description: `${street.name}, ${neighbourhoodName}`,
-              structured_formatting: {
-                main_text: street.name,
-                secondary_text: `${neighbourhoodName}, ${cityOnly}`
-              }
-            }))
-            
-            console.log('Auto-formatted Google streets:', formattedGoogleStreets)
-            setStreetSuggestions(formattedGoogleStreets.slice(0, 100)) // Show more streets
-            setShowStreetSuggestions(true)
-            return
-          }
-        } catch (googleError) {
-          console.log('💥 Google Roads API failed:', googleError)
-          
-          // Show user-friendly error message
-          if (googleError instanceof Error && googleError.message.includes('403')) {
-            toast.error('Google Roads API not enabled. Please contact support to enable this feature.')
-          }
-        }
-        */
-        
-        // Fallback to Google Places API
+      // Use Google Places API for street search with geographic context
         if (autocompleteService) {
+        const searchQuery = `${communityContext}${municipalityName} streets`
+        console.log('Search query:', searchQuery)
+        
           const request = {
-            input: `${neighbourhoodName} streets`,
+          input: searchQuery,
             types: ['route'],
             componentRestrictions: { country: 'ca' }
           }
@@ -750,20 +1528,19 @@ export function ManuallyAssignTerritoryModal({
                 })
                 .slice(0, 30)
               
+            console.log('Auto-loaded streets:', cleanedPredictions)
               setStreetSuggestions(cleanedPredictions)
               setShowStreetSuggestions(true)
-              console.log('Google Places fallback streets:', cleanedPredictions)
             } else {
-              console.log('No streets found for neighbourhood, clearing suggestions')
+            console.log('Google Places API failed:', status)
               setStreetSuggestions([])
               setShowStreetSuggestions(false)
             }
           })
         } else {
-          console.log('No streets found for neighbourhood, clearing suggestions')
+        console.log('No autocomplete service available')
           setStreetSuggestions([])
           setShowStreetSuggestions(false)
-        }
       }
 
     } catch (error) {
@@ -773,12 +1550,10 @@ export function ManuallyAssignTerritoryModal({
     } finally {
       setIsLoadingStreets(false)
     }
-  }, [selectedCity, autocompleteService])
+  }, [selectedArea, selectedMunicipality, selectedCommunity, autocompleteService])
 
   // Close all dropdowns and panels
   const closeAllDropdowns = () => {
-    setShowCitySuggestions(false)
-    setShowNeighbourhoodSuggestions(false)
     setShowStreetSuggestions(false)
     setShowResultsPanel(false)
   }
@@ -788,20 +1563,12 @@ export function ManuallyAssignTerritoryModal({
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Element
       // Check if click is outside any dropdown container
-      const isOutsideCityDropdown = !target.closest('[data-dropdown="city"]')
-      const isOutsideNeighbourhoodDropdown = !target.closest('[data-dropdown="neighbourhood"]')
       const isOutsideStreetDropdown = !target.closest('[data-dropdown="street"]')
       
-      if (isOutsideCityDropdown) {
-        setShowCitySuggestions(false)
-      }
-      if (isOutsideNeighbourhoodDropdown) {
-        setShowNeighbourhoodSuggestions(false)
-      }
       if (isOutsideStreetDropdown) {
         setShowStreetSuggestions(false)
       }
-      setShowResultsPanel(false)
+        setShowResultsPanel(false)
     }
 
     document.addEventListener('mousedown', handleClickOutside)
@@ -810,38 +1577,8 @@ export function ManuallyAssignTerritoryModal({
     }
   }, [])
 
-  // Handle city selection
-  const handleCitySelect = (city: PlaceSuggestion) => {
-    setSelectedCity(city.description)
-    setShowCitySuggestions(false)
-    setSelectedNeighbourhood("")
-    setSelectedStreets([])
-    setDetectedResidents([])
-    setGeneratedPolygon(null)
-    setNoStreetsFound(false)
-    setStreetSuggestions([])
-    setNeighbourhoodSuggestions([])
-    // Auto-fetch neighbourhoods immediately when city is selected
-    autoFetchNeighbourhoods(city.description)
-    // Auto-load neighbourhoods for the selected city
-    loadNeighbourhoodsForCity(city.description)
-  }
 
-  // Handle neighbourhood selection
-  const handleNeighbourhoodSelect = (neighbourhood: PlaceSuggestion) => {
-    setSelectedNeighbourhood(neighbourhood.description)
-    setShowNeighbourhoodSuggestions(false)
-    setSelectedStreets([])
-    setDetectedResidents([])
-    setGeneratedPolygon(null)
-    setNoStreetsFound(false)
-    setStreetSuggestions([])
-    
-    // Auto-fetch streets for the selected neighbourhood
-    autoFetchStreets(neighbourhood.description)
-    // Auto-load streets for the selected neighbourhood
-    loadStreetsForNeighbourhood(neighbourhood.description)
-  }
+
 
 
 
@@ -922,151 +1659,311 @@ export function ManuallyAssignTerritoryModal({
     toast.info('🔄 Street removed. Building detection data has been reset. Please run "Detect Residents" again.')
   }
 
-  // Enhanced resident detection with multi-source approach
+  // Turf.js utility functions for accurate geographic calculations
+  const calculateTerritoryArea = useCallback((polygon: any): number => {
+    if (!polygon || polygon.length < 3) {
+      console.warn('⚠️ Invalid polygon for area calculation')
+      return 0
+    }
+
+    try {
+      // Ensure polygon is closed (first and last points are the same)
+      const closedPolygon = [...polygon]
+      if (closedPolygon[0][0] !== closedPolygon[closedPolygon.length - 1][0] || 
+          closedPolygon[0][1] !== closedPolygon[closedPolygon.length - 1][1]) {
+        closedPolygon.push(closedPolygon[0])
+      }
+
+      // Create GeoJSON polygon with [lng, lat] format
+      const geoJsonPolygon = turf.polygon([closedPolygon])
+      const area = turf.area(geoJsonPolygon) // Returns area in square meters
+      
+      console.log(`📊 Turf.js area calculation: ${area} sq meters = ${(area / 10000).toFixed(2)} hectares`)
+      return area
+    } catch (error) {
+      console.error('❌ Error calculating area with Turf.js:', error)
+      return 0
+    }
+  }, [])
+
+  const isResidentialAddress = useCallback((lat: number, lng: number, polygon: any): boolean => {
+    if (!polygon || polygon.length < 3) {
+      console.warn('⚠️ No valid territory polygon for geospatial validation')
+      return true // Allow if no polygon yet
+    }
+
+    try {
+      // Create point in [lng, lat] format for Turf.js
+      const point = turf.point([lng, lat])
+      
+      // Ensure polygon is closed
+      const closedPolygon = [...polygon]
+      if (closedPolygon[0][0] !== closedPolygon[closedPolygon.length - 1][0] || 
+          closedPolygon[0][1] !== closedPolygon[closedPolygon.length - 1][1]) {
+        closedPolygon.push(closedPolygon[0])
+      }
+
+      // Create GeoJSON polygon
+      const geoJsonPolygon = turf.polygon([closedPolygon])
+      
+      // Use Turf.js for accurate point-in-polygon test
+      const isInside = turf.booleanPointInPolygon(point, geoJsonPolygon)
+      
+      console.log(`📍 Turf.js geospatial check: (${lat}, ${lng}) inside polygon: ${isInside}`)
+      return isInside
+    } catch (error) {
+      console.error('❌ Error in point-in-polygon check:', error)
+      return true // Allow if error
+    }
+  }, [])
+
+  const generateEnhancedPolygon = useCallback((residents: DetectedResident[]): any => {
+    if (residents.length === 0) return null
+
+    try {
+      // Create points array for Turf.js
+      const points = residents.map(resident => 
+        turf.point([resident.lng, resident.lat])
+      )
+
+      // Create a feature collection
+      const pointsCollection = turf.featureCollection(points)
+      
+      // Calculate bounding box
+      const bbox = turf.bbox(pointsCollection)
+      
+      // Create a polygon from the bounding box with some padding
+      const padding = 0.001 // ~100m padding
+      const bufferedBbox = [
+        [bbox[0] - padding, bbox[1] - padding], // SW
+        [bbox[2] + padding, bbox[1] - padding], // SE
+        [bbox[2] + padding, bbox[3] + padding], // NE
+        [bbox[0] - padding, bbox[3] + padding], // NW
+        [bbox[0] - padding, bbox[1] - padding]  // Close polygon
+      ]
+
+      console.log(`🗺️ Generated enhanced polygon with ${bufferedBbox.length} points`)
+      return bufferedBbox
+    } catch (error) {
+      console.error('❌ Error generating enhanced polygon:', error)
+      return null
+    }
+  }, [])
+
+  // Enhanced resident detection with OSM integration and Turf.js
   const detectResidentsFromStreets = useCallback(async () => {
-    if (selectedStreets.length === 0 || !placesService) return
+    if (selectedStreets.length === 0) return
+
+    // Validate geographic hierarchy first
+    const hierarchyValidation = validateGeographicHierarchy()
+    if (hierarchyValidation.errors.length > 0) {
+      toast.error(`Geographic validation failed: ${hierarchyValidation.errors.join(', ')}`)
+      return
+    }
+
+    if (hierarchyValidation.warnings.length > 0) {
+      toast.warning(`Geographic warnings: ${hierarchyValidation.warnings.join(', ')}`)
+    }
 
     setIsDetectingResidents(true)
     setDetectedResidents([])
-    toast.info('🚀 Starting enhanced resident detection...')
+    setApiCallCount(0)
+    toast.info('🚀 Starting enhanced OSM-based resident detection with geographic hierarchy...')
 
     try {
       const allResidents: DetectedResident[] = []
-      const streetCoordinates: [number, number][] = []
+      let totalApiCalls = 0
 
       console.log('🔍 Starting enhanced detection for', selectedStreets.length, 'streets')
+      console.log('🗺️ Geographic Hierarchy:', {
+        area: selectedArea,
+        municipality: selectedMunicipality,
+        community: selectedCommunity
+      })
+      console.log('🧪 Testing Current Settings:', {
+        searchRadius,
+        maxDistanceFromStreet,
+        buildingTypeFilter,
+        addressValidationLevel,
+        coordinatePrecision
+      })
 
-             // STEP 1: Collect all street coordinates FIRST
-       for (const streetId of selectedStreets) {
-         console.log(`📍 Collecting coordinates for street ID: ${streetId}`)
-         
-         if (streetId.startsWith('osm_way_')) {
-           // Use OSM API for OSM streets
-           try {
-             const streetInfo = await getOsmStreetInfo(streetId)
-             streetCoordinates.push([streetInfo.lat, streetInfo.lon])
-             console.log('✅ OSM street coordinates collected:', streetInfo.lat, streetInfo.lon)
-           } catch (error) {
-             console.error('❌ OSM street coordinates failed:', error)
-           }
-         } else {
-           // Use Google Places API for Google streets
-           try {
-             const request = {
-               placeId: streetId,
-               fields: ['geometry']
-             }
-
-             const result = await new Promise<any>((resolve, reject) => {
-               placesService.getDetails(request, (result: any, status: any) => {
-                 if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
-                   resolve(result)
-                 } else {
-                   reject(new Error(`Place details failed: ${status}`))
-                 }
-               })
-             })
-
-             const location = result.geometry.location
-             streetCoordinates.push([location.lat(), location.lng()])
-             console.log('✅ Google Places street coordinates collected:', location.lat(), location.lng())
-           } catch (error) {
-             console.error('❌ Google Places street coordinates failed:', error)
-           }
-         }
-       }
-
-       // STEP 2: Generate enhanced polygon from collected coordinates
-       let enhancedPolygon: any = null
-       if (streetCoordinates.length > 0) {
-         enhancedPolygon = generateEnhancedPolygon(streetCoordinates)
-         setGeneratedPolygon(enhancedPolygon)
-         console.log('🗺️ Enhanced polygon generated for geospatial validation')
-       }
-
-       // STEP 3: Now process each selected street with enhanced detection (with polygon available)
-       for (const streetId of selectedStreets) {
-         console.log(`📍 Processing street ID: ${streetId}`)
-         
-         // Dual data source support
-         let streetInfo: any = null
-         let streetName = ''
-         
-         if (streetId.startsWith('osm_way_')) {
-           // Use OSM API for OSM streets
-           console.log('🗺️ Using OSM API for street:', streetId)
-           try {
-             streetInfo = await getOsmStreetInfo(streetId)
-             streetName = streetInfo.name
-             console.log('✅ OSM street info retrieved:', streetName)
-           } catch (error) {
-             console.error('❌ OSM street info failed:', error)
-             continue
-           }
-         } else {
-           // Use Google Places API for Google streets
-           console.log('🌐 Using Google Places API for street:', streetId)
-           try {
-             const request = {
-               placeId: streetId,
-               fields: ['geometry', 'formatted_address', 'name', 'address_components']
-             }
-
-             const result = await new Promise<any>((resolve, reject) => {
-               placesService.getDetails(request, (result: any, status: any) => {
-                 if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
-                   resolve(result)
-                 } else {
-                   reject(new Error(`Place details failed: ${status}`))
-                 }
-               })
-             })
-
-             streetInfo = result
-             streetName = result.name || result.formatted_address.split(',')[0]
-             console.log('✅ Google Places street info retrieved:', streetName)
-           } catch (error) {
-             console.error('❌ Google Places street info failed:', error)
-             continue
-           }
-         }
-
-         // Enhanced building detection with multiple approaches (now with geospatial validation)
-         const streetResidents = await searchResidentialBuildings(streetInfo, streetName, enhancedPolygon)
-         const reverseGeocodeResidents = await reverseGeocodeResidentialBuildings(streetInfo, streetName, enhancedPolygon)
+      // Process each selected street
+      for (const streetId of selectedStreets) {
+        console.log(`📍 Processing street ID: ${streetId}`)
         
-        // Combine and deduplicate residents
-        const combinedResidents = [...streetResidents, ...reverseGeocodeResidents]
-        const uniqueResidents = deduplicateResidents(combinedResidents)
+        let streetInfo: any = null
+        let streetName = ''
         
-        // Apply sequential number detection
-        const sequentialResidents = await detectSequentialHouseNumbers(uniqueResidents, streetName)
-        
-        allResidents.push(...sequentialResidents)
-        
-        console.log(`✅ Street "${streetName}" processed: ${sequentialResidents.length} residents found`)
-        toast.success(`Found ${sequentialResidents.length} residents on ${streetName}`)
+        if (streetId.startsWith('overpass_')) {
+          // Use Overpass API for Overpass streets - get street name from cached data
+          console.log('🗺️ Using Overpass API for street:', streetId)
+          const overpassStreet = streetSuggestions.find(street => street.place_id === streetId)
+          if (overpassStreet) {
+            streetName = overpassStreet.structured_formatting.main_text
+            console.log('✅ Overpass street name retrieved:', streetName)
+            
+            // Get buildings directly from Overpass API
+            const buildings = await getBuildingsAlongStreet(streetName, searchRadius)
+            if (buildings.length > 0) {
+              console.log(`🏠 Found ${buildings.length} buildings along ${streetName}`)
+              
+                             // Convert buildings to resident format with coordinate validation
+               const residents = buildings
+                 .filter(building => {
+                   // Filter out buildings with invalid coordinates
+                   const isValidLat = building.lat && building.lat !== 0 && building.lat > -90 && building.lat < 90;
+                   const isValidLng = building.lng && building.lng !== 0 && building.lng > -180 && building.lng < 180;
+                   return isValidLat && isValidLng;
+                 })
+                 .map(building => ({
+                   id: `overpass_building_${building.id}`,
+                   name: `${building.houseNumber} ${building.street}`,
+                   address: `${building.houseNumber} ${building.street}`,
+                   lat: building.lat,
+                   lng: building.lng,
+                   type: 'residential',
+                   source: 'overpass',
+                   confidence: 0.9,
+                   validated: true,
+                   status: 'active'
+                 }))
+              
+              allResidents.push(...residents)
+              console.log(`✅ Added ${residents.length} residents from Overpass API for ${streetName}`)
+            }
+            continue // Skip the rest of the processing for Overpass streets
+          } else {
+            console.error('❌ Overpass street not found in cached data:', streetId)
+            continue
+          }
+        } else if (streetId.startsWith('osm_way_')) {
+          // Use OSM API for OSM streets
+          console.log('🗺️ Using OSM API for street:', streetId)
+          try {
+            streetInfo = await getOsmStreetInfo(streetId)
+            streetName = streetInfo.name
+            console.log('✅ OSM street info retrieved:', streetName)
+          } catch (error) {
+            console.error('❌ OSM street info failed:', error)
+            continue
+          }
+        } else {
+          // Use Google Places API for Google streets
+          console.log('🌐 Using Google Places API for street:', streetId)
+          try {
+            const request = {
+              placeId: streetId,
+              fields: ['geometry', 'formatted_address', 'name', 'address_components']
+            }
+
+            const result = await new Promise<any>((resolve, reject) => {
+              placesService.getDetails(request, (result: any, status: any) => {
+                if (status === window.google.maps.places.PlacesServiceStatus.OK && result) {
+                  resolve(result)
+                } else {
+                  reject(new Error(`Place details failed: ${status}`))
+                }
+              })
+            })
+
+            streetInfo = result
+            streetName = result.name || result.formatted_address.split(',')[0]
+            console.log('✅ Google Places street info retrieved:', streetName)
+            totalApiCalls++
+          } catch (error) {
+            console.error('❌ Google Places street info failed:', error)
+            continue
+          }
+        }
+
+        // Use OSM service for building detection with geographic context
+        try {
+          // Create bounding box for the street
+          const bbox = osmService.createTightBoundingBox(streetInfo, searchRadius)
+          
+          // Build query with geographic context
+          const query = osmService.buildResidentialBuildingQuery({
+            bbox,
+            buildingTypes: [buildingTypeFilter as ResidentialBuildingType],
+            streetName,
+            timeout: 30
+          })
+          
+          const osmBuildings = await osmService.fetchOSMBuildings(query)
+          const processedBuildings = osmService.processOSMBuildings(osmBuildings, streetName)
+
+          // Apply geographic hierarchy filtering
+          const geographicallyFilteredBuildings = processedBuildings.filter(building => {
+            // Basic coordinate validation
+            if (!building.lat || !building.lng) return false
+            
+            // Validate against geographic hierarchy if coordinates are available
+            if (selectedArea && selectedMunicipality) {
+              // Use Turf.js to check if building is within reasonable distance of the selected area
+              const buildingPoint = turf.point([building.lng, building.lat])
+              
+              // Create a bounding box around the selected area (approximate)
+              // This is a simplified approach - in production you'd want more precise boundaries
+              const areaBounds: [number, number, number, number] = [
+                bbox.west - 0.1,  // minLng
+                bbox.south - 0.1, // minLat
+                bbox.east + 0.1,  // maxLng
+                bbox.north + 0.1  // maxLat
+              ]
+              const areaPolygon = turf.bboxPolygon(areaBounds)
+              
+              return turf.booleanPointInPolygon(buildingPoint, areaPolygon)
+            }
+            
+            return true
+          })
+
+          console.log(`🏢 OSM found ${processedBuildings.length} buildings, ${geographicallyFilteredBuildings.length} after geographic filtering for ${streetName}`)
+
+          // Convert OSM buildings to DetectedResident format
+          const streetResidents: DetectedResident[] = geographicallyFilteredBuildings.map((building, index) => ({
+            id: `osm_${building.id}_${index}`,
+            name: `Resident ${building.id}`,
+            address: building.address || `${building.id} ${streetName}`,
+            buildingNumber: building.buildingNumber ? parseInt(building.buildingNumber) : undefined,
+            lat: building.lat,
+            lng: building.lng,
+            status: 'not-contacted',
+            phone: '',
+            email: '',
+            notes: `OSM Building: ${building.buildingType || 'residential'}`
+          }))
+
+          allResidents.push(...streetResidents)
+          console.log(`✅ Street "${streetName}" processed: ${streetResidents.length} residents found`)
+          toast.success(`Found ${streetResidents.length} residents on ${streetName}`)
+          } catch (error) {
+          console.error(`❌ OSM building detection failed for ${streetName}:`, error)
+        }
       }
 
-      
+      // Generate polygon from detected residents
+      const enhancedPolygon = generateEnhancedPolygon(allResidents)
+      setGeneratedPolygon(enhancedPolygon)
 
-       // Calculate area and density
-       const area = calculateTerritoryArea(enhancedPolygon || [])
-       const density = allResidents.length / (area || 1)
+      // Calculate area and density using Turf.js
+      const area = calculateTerritoryArea(enhancedPolygon || [])
+      const density = allResidents.length / (area / 10000 || 1) // Convert to hectares
+      
+      setTerritoryArea(area)
+      setBuildingDensity(density)
+      setDetectedResidents(allResidents)
+      setApiCallCount(totalApiCalls)
        
-       setTerritoryArea(area)
-       setBuildingDensity(density)
-       setDetectedResidents(allResidents)
+      console.log(`🎉 Enhanced detection completed: ${allResidents.length} residents from ${selectedStreets.length} streets`)
+      console.log(`📊 Territory stats: Area: ${(area / 10000).toFixed(2)} ha, Density: ${density.toFixed(1)} buildings/ha`)
+      console.log(`📊 Final results: ${allResidents.length} validated residents, ${enhancedPolygon?.length || 0} polygon points`)
+      console.log(`📊 API Call Statistics: ${totalApiCalls} total API calls made`)
+      console.log(`🗺️ Building-based polygon bounds:`, enhancedPolygon)
        
-       console.log(`🎉 Enhanced detection completed: ${allResidents.length} residents from ${selectedStreets.length} streets`)
-       console.log(`📊 Territory stats: Area: ${area.toFixed(2)} ha, Density: ${density.toFixed(1)} buildings/ha`)
-       console.log(`📊 API Call Statistics: ${apiCallCount} total API calls made`)
-       
-       // Enhanced success toast with detailed stats
-       toast.success(`✅ Enhanced detection complete! Found ${allResidents.length} residents across ${selectedStreets.length} streets. Area: ${area.toFixed(2)} ha, Density: ${density.toFixed(1)} buildings/ha`)
-       
-       // API call statistics
-       toast.info(`📊 Detection used ${apiCallCount} API calls across multiple data sources`)
+      // Enhanced success toast with detailed stats
+      toast.success(`✅ Enhanced detection complete! Found ${allResidents.length} residents across ${selectedStreets.length} streets. Area: ${(area / 10000).toFixed(2)} ha, Density: ${density.toFixed(1)} buildings/ha`)
       
     } catch (error) {
       console.error('❌ Enhanced detection failed:', error)
@@ -1074,7 +1971,7 @@ export function ManuallyAssignTerritoryModal({
     } finally {
       setIsDetectingResidents(false)
     }
-  }, [selectedStreets, placesService, selectedNeighbourhood, selectedCity])
+  }, [selectedStreets, placesService, searchRadius, maxDistanceFromStreet, buildingTypeFilter, addressValidationLevel, coordinatePrecision, calculateTerritoryArea, generateEnhancedPolygon])
 
   // Helper function to extract building number from address
   const extractBuildingNumber = (address: string): number => {
@@ -1213,7 +2110,8 @@ export function ManuallyAssignTerritoryModal({
             
                          // Enhanced validation with geospatial check
              if (buildingNumber > 0 && isResidentialAddress(
-               { lat: buildingLocation.lat(), lng: buildingLocation.lng() }, 
+               buildingLocation.lat(), 
+               buildingLocation.lng(), 
                territoryPolygon || []
              )) {
               residents.push({
@@ -1308,7 +2206,8 @@ export function ManuallyAssignTerritoryModal({
               const buildingNumber = extractBuildingNumberFromAddressValidation(result)
               
               if (buildingNumber > 0 && isResidentialAddress(
-                { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() }, 
+                result.geometry.location.lat(), 
+                result.geometry.location.lng(), 
                 territoryPolygon || []
               )) {
                 const location = result.geometry.location
@@ -1563,148 +2462,11 @@ export function ManuallyAssignTerritoryModal({
     }
   }
 
-  // Generate enhanced polygon
-  const generateEnhancedPolygon = (streetCoordinates: [number, number][]) => {
-    if (streetCoordinates.length === 0) {
-      console.log('⚠️ No street coordinates provided for polygon generation')
-      return []
-    }
-    
-    console.log('🗺️ Generating polygon from', streetCoordinates.length, 'street coordinates')
-    
-    const bounds = new window.google.maps.LatLngBounds()
-    streetCoordinates.forEach(([lat, lng]) => {
-      bounds.extend(new window.google.maps.LatLng(lat, lng))
-    })
 
-    const ne = bounds.getNorthEast()
-    const sw = bounds.getSouthWest()
-    const padding = 0.005 // Increased padding for better coverage
 
-    const polygon = [
-      { lat: ne.lat() + padding, lng: sw.lng() - padding },
-      { lat: ne.lat() + padding, lng: ne.lng() + padding },
-      { lat: sw.lat() - padding, lng: ne.lng() + padding },
-      { lat: sw.lat() - padding, lng: sw.lng() - padding },
-    ]
-    
-    console.log('🗺️ Generated polygon with', polygon.length, 'coordinates:', polygon)
-    return polygon
-  }
 
-  // Calculate territory area
-  const calculateTerritoryArea = (polygonCoords: { lat: number, lng: number }[]): number => {
-    if (!polygonCoords || polygonCoords.length < 3) {
-      console.log('⚠️ Not enough polygon coordinates for area calculation:', polygonCoords?.length || 0)
-      return 0
-    }
-    
-    console.log('📊 Calculating area for polygon with', polygonCoords.length, 'coordinates')
-    console.log('📊 Polygon coordinates:', polygonCoords)
-    
-    try {
-      // Check if Google Maps Geometry Library is available
-      if (window.google?.maps?.geometry?.spherical?.computeArea) {
-        console.log('✅ Using Google Maps Geometry Library for area calculation')
-        
-        // Ensure polygon is closed (first and last points should be the same)
-        let closedCoords = [...polygonCoords]
-        if (closedCoords.length > 0) {
-          const first = closedCoords[0]
-          const last = closedCoords[closedCoords.length - 1]
-          if (first.lat !== last.lat || first.lng !== last.lng) {
-            closedCoords.push({ lat: first.lat, lng: first.lng })
-            console.log('🔧 Closed polygon by adding first point at end')
-          }
-        }
-        
-        const latLngCoords = closedCoords.map(coord => 
-          new window.google.maps.LatLng(coord.lat, coord.lng)
-        )
-        
-        const areaInSquareMeters = window.google.maps.geometry.spherical.computeArea(latLngCoords)
-        const areaInHectares = areaInSquareMeters / 10000
-        console.log('📊 Google Maps area calculation:', areaInSquareMeters, 'sq meters =', areaInHectares, 'hectares')
-        console.log('📊 Closed polygon coordinates used:', closedCoords.length, 'points')
-        return areaInHectares
-      } else {
-        console.log('⚠️ Google Maps Geometry Library not available, using fallback calculation')
-        
-        // Fallback calculation using bounding box
-        const lats = polygonCoords.map(p => p.lat)
-        const lngs = polygonCoords.map(p => p.lng)
-        const latDiff = Math.max(...lats) - Math.min(...lats)
-        const lngDiff = Math.max(...lngs) - Math.min(...lngs)
-        
-        // Convert to meters (1 degree ≈ 111,000 meters)
-        const areaInSquareMeters = latDiff * lngDiff * 111000 * 111000
-        const areaInHectares = areaInSquareMeters / 10000
-        
-        console.log('📊 Fallback area calculation:', areaInSquareMeters, 'sq meters =', areaInHectares, 'hectares')
-        console.log('📊 Bounding box:', { latDiff, lngDiff, lats, lngs })
-        return areaInHectares
-      }
-      
-    } catch (error) {
-      console.error('❌ Area calculation failed:', error)
-      
-      // Emergency fallback: use a simple bounding box calculation
-      try {
-        const lats = polygonCoords.map(p => p.lat)
-        const lngs = polygonCoords.map(p => p.lng)
-        const latDiff = Math.max(...lats) - Math.min(...lats)
-        const lngDiff = Math.max(...lngs) - Math.min(...lngs)
-        const areaInSquareMeters = latDiff * lngDiff * 111000 * 111000
-        const areaInHectares = areaInSquareMeters / 10000
-        console.log('📊 Emergency fallback area calculation:', areaInHectares, 'hectares')
-        return areaInHectares
-      } catch (fallbackError) {
-        console.error('❌ Emergency fallback also failed:', fallbackError)
-        return 0
-      }
-    }
-  }
 
-  // Enhanced residential address validation with geospatial check
-  const isResidentialAddress = (
-    coords: { lat: number; lng: number }, 
-    territoryPolygon: { lat: number; lng: number }[]
-  ): boolean => {
-    if (!territoryPolygon || territoryPolygon.length < 3) {
-      console.log('⚠️ No valid territory polygon for geospatial validation')
-      return false
-    }
-    
-    try {
-      // Use Google Maps geometry library for point-in-polygon check
-      if (window.google?.maps?.geometry?.poly) {
-        const point = new window.google.maps.LatLng(coords.lat, coords.lng)
-        const polygon = territoryPolygon.map(coord => 
-          new window.google.maps.LatLng(coord.lat, coord.lng)
-        )
-        
-        const googlePolygon = new window.google.maps.Polygon({ paths: polygon })
-        const isInside = window.google.maps.geometry.poly.containsLocation(point, googlePolygon)
-        
-        console.log(`📍 Geospatial check: (${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}) inside polygon: ${isInside}`)
-        return isInside
-      }
-      
-      // Fallback: simple bounding box check
-      const bounds = new window.google.maps.LatLngBounds()
-      territoryPolygon.forEach(coord => 
-        bounds.extend(new window.google.maps.LatLng(coord.lat, coord.lng))
-      )
-      const isInside = bounds.contains(new window.google.maps.LatLng(coords.lat, coords.lng))
-      
-      console.log(`📍 Bounding box check: (${coords.lat.toFixed(6)}, ${coords.lng.toFixed(6)}) inside bounds: ${isInside}`)
-      return isInside
-      
-    } catch (error) {
-      console.error('❌ Geospatial validation failed:', error)
-      return false
-    }
-  }
+
 
   // Search for specific house numbers on a street
   const searchForHouseNumbers = async (streetInfo: any, streetName: string, territoryPolygon?: any): Promise<DetectedResident[]> => {
@@ -1739,7 +2501,8 @@ export function ManuallyAssignTerritoryModal({
             const buildingNumber = extractBuildingNumberFromAddressValidation(result)
             
             if (buildingNumber > 0 && isResidentialAddress(
-              { lat: result.geometry.location.lat(), lng: result.geometry.location.lng() }, 
+              result.geometry.location.lat(), 
+              result.geometry.location.lng(), 
               territoryPolygon || []
             )) {
               const location = result.geometry.location
@@ -2020,6 +2783,9 @@ export function ManuallyAssignTerritoryModal({
         const savedTerritory = response.data.data
         console.log('✅ Territory saved successfully:', savedTerritory)
         
+        // Store the saved territory ID for assignment
+        setSavedTerritoryId(savedTerritory._id)
+        
         // Enhanced success message with territory details
         toast.success(`✅ Territory "${territoryName}" saved as draft! 
           📊 ${detectedResidents.length} residents detected
@@ -2068,8 +2834,7 @@ export function ManuallyAssignTerritoryModal({
     setFormStep(1)
     setTerritoryName("")
     setTerritoryDescription("")
-    setSelectedCity("")
-    setSelectedNeighbourhood("")
+
     setSelectedStreets([])
     setDetectedResidents([])
     setGeneratedPolygon(null)
@@ -2081,6 +2846,9 @@ export function ManuallyAssignTerritoryModal({
     setAssignmentSearchQuery("")
     setAssignmentSearchResults([])
     setSelectedAssignment(null)
+    setSavedTerritoryId(null)
+    setIsAssigningTerritory(false)
+    setIsSelectionUpdate(false)
   }, [])
 
   // Handle modal close
@@ -2092,7 +2860,7 @@ export function ManuallyAssignTerritoryModal({
   // Handle step 1 submit - Save territory and advance to assignment step
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (territoryName.trim() && selectedCity && selectedNeighbourhood && selectedStreets.length > 0 && detectedResidents.length > 0) {
+    if (territoryName.trim() && selectedMunicipality && selectedStreets.length > 0 && detectedResidents.length > 0) {
       // Call saveTerritory function which will handle the API call
       await saveTerritory()
     }
@@ -2101,14 +2869,69 @@ export function ManuallyAssignTerritoryModal({
   // Handle step 2 submit - Assign territory (optional)
   const handleStep2Submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
     // Assignment is optional - user can skip or assign
-    if (selectedAssignment && assignedDate) {
-      // TODO: Implement assignment logic here
-      console.log('Assigning territory to:', selectedAssignment, 'on date:', assignedDate)
-      toast.success('Territory assigned successfully!')
+    if (selectedAssignment && assignedDate && savedTerritoryId) {
+      setIsAssigningTerritory(true)
+      try {
+        console.log('Assigning territory to:', selectedAssignment, 'on date:', assignedDate)
+        
+        // Prepare assignment data
+        const assignmentData = {
+          zoneId: savedTerritoryId, // Use the saved territory ID
+          effectiveFrom: new Date(assignedDate).toISOString(),
+          status: 'ACTIVE' as const,
+          ...(assignmentType === "team" 
+            ? { teamId: selectedAssignment._id }
+            : { agentId: selectedAssignment._id }
+          )
+        };
+
+        console.log('Assignment data:', assignmentData);
+
+        // Create assignment using the assignment endpoint
+        const assignmentResponse = await apiInstance.post('/assignments/create', assignmentData);
+
+        if (assignmentResponse.data) {
+          const isScheduled = assignmentResponse.data.scheduled;
+          const assignedToName = selectedAssignment.name;
+          
+          if (isScheduled) {
+            // Scheduled assignment
+            toast.success(`Territory "${territoryName}" has been scheduled for assignment to ${assignedToName} on ${new Date(assignedDate).toLocaleDateString()}`);
+          } else {
+            // Immediate assignment
+            toast.success(`Territory "${territoryName}" has been assigned to ${assignedToName} (${assignmentType})`);
+          }
+        } else {
+          throw new Error('Failed to assign territory');
+        }
+      } catch (error) {
+        console.error('❌ Error assigning territory:', error)
+        
+        // Enhanced error handling with specific backend error messages
+        if (error && typeof error === 'object' && 'response' in error) {
+          const axiosError = error as any
+          console.error('Backend response data:', axiosError.response?.data)
+          console.error('Backend response status:', axiosError.response?.status)
+          
+          if (axiosError.response?.data?.message) {
+            toast.error(`❌ ${axiosError.response.data.message}`)
+            return // Don't close modal on error
+          }
+        }
+        
+        toast.error(error instanceof Error ? error.message : '❌ Unknown error occurred while assigning territory')
+        return // Don't close modal on error
+      } finally {
+        setIsAssigningTerritory(false)
+      }
+    } else {
+      // User chose to skip assignment - show info message
+      toast.info('Territory saved without assignment. You can assign it later.')
     }
     
-    // Always call onTerritorySaved and close modal after step 2
+    // Only close modal if we reach here (success or skip)
     onTerritorySaved({
       name: territoryName,
       description: territoryDescription,
@@ -2197,60 +3020,13 @@ export function ManuallyAssignTerritoryModal({
                   />
                 </div>
                 
-                                 <div className="space-y-2">
-                   <Label htmlFor="selectedCity" className="text-sm font-medium text-gray-700">
-                     City *
-                   </Label>
-                   <div className="relative" data-dropdown="city">
-                    <Input
-                      id="selectedCity"
-                      type="text"
-                      value={selectedCity}
-                      onChange={(e) => {
-                        setSelectedCity(e.target.value)
-                        if (e.target.value.length >= 2) {
-                          searchCities(e.target.value)
-                          setShowCitySuggestions(true)
-                          setShowResultsPanel(false)
-                        } else {
-                          setShowCitySuggestions(false)
-                          setShowResultsPanel(false)
-                        }
-                      }}
-                      onFocus={() => {
-                        if (selectedCity.length >= 2) {
-                          searchCities(selectedCity)
-                          setShowCitySuggestions(true)
-                          setShowResultsPanel(false)
-                        }
-                      }}
-                      placeholder="Search for a city"
-                      className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20"
-                      required
-                    />
-                    {showCitySuggestions && citySuggestions.length > 0 && (
-                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                        {citySuggestions.map((city) => (
-                          <button
-                            key={city.place_id}
-                            type="button"
-                            className="w-full px-3 py-2 text-left hover:bg-blue-50 focus:bg-blue-50 border-b border-gray-100 last:border-b-0"
-                            onClick={() => handleCitySelect(city)}
-                          >
-                            <div className="font-medium text-blue-600">{city.structured_formatting.main_text}</div>
-                            <div className="text-sm text-gray-500">{city.structured_formatting.secondary_text}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
 
-              <div className="space-y-2">
+                </div>
+                
+                <div className="space-y-2">
                 <Label htmlFor="territoryDescription" className="text-sm font-medium text-gray-700">
                   Description
-                </Label>
+                  </Label>
                 <Textarea
                   id="territoryDescription"
                   value={territoryDescription}
@@ -2269,109 +3045,195 @@ export function ManuallyAssignTerritoryModal({
               </h3>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                 <div className="space-y-2">
-                   <Label htmlFor="selectedNeighbourhood" className="text-sm font-medium text-gray-700">
-                     Neighbourhood/Area *
-                   </Label>
-                   <div className="relative" data-dropdown="neighbourhood">
+
+                {/* Geographic Hierarchy Fields */}
+                <div className="space-y-2">
+                  <Label htmlFor="selectedArea" className="text-sm font-medium text-gray-700">
+                    Area/Region
+                  </Label>
+                  <div className="relative" data-dropdown="area" ref={areaDropdownRef}>
                     <Input
-                      id="selectedNeighbourhood"
+                      id="selectedArea"
                       type="text"
-                      value={selectedNeighbourhood}
+                      value={areaInputValue}
                       onChange={(e) => {
-                        console.log('Neighbourhood input onChange - value:', e.target.value)
-                        console.log('selectedCity:', selectedCity)
-                        console.log('value length:', e.target.value.length)
+                        console.log('🔄 Area input onChange - value:', e.target.value)
+                        setAreaInputValue(e.target.value)
                         
-                        setSelectedNeighbourhood(e.target.value)
+                        // Don't search if we're programmatically setting the value
+                        if (isSettingAreaProgrammatically) {
+                          console.log('🔄 Programmatically setting area, skipping search')
+                          return
+                        }
                         
-                        // If we have a city selected, show suggestions immediately
-                        if (selectedCity && e.target.value.length >= 1) {
-                          console.log('Calling searchNeighbourhoods with:', e.target.value)
-                          searchNeighbourhoods(e.target.value)
-                          setShowNeighbourhoodSuggestions(true)
-                          setShowResultsPanel(false)
-                        } else if (selectedCity && e.target.value.length === 0) {
-                          // If user clears the input, show all available neighbourhoods
-                          console.log('Input cleared, showing all neighbourhoods')
-                          if (neighbourhoodSuggestions.length > 0) {
-                            setShowNeighbourhoodSuggestions(true)
-                          } else {
-                            setShowNeighbourhoodSuggestions(false)
-                          }
-                          setShowResultsPanel(false)
-                        } else {
-                          console.log('Not calling searchNeighbourhoods - conditions not met')
-                          setShowNeighbourhoodSuggestions(false)
-                          setShowResultsPanel(false)
+                        // Clear suggestions immediately for short queries
+                        if (e.target.value.length < 2) {
+                          console.log('🗑️ Clearing area suggestions')
+                          setAreaSuggestions([])
+                          return
                         }
-                      }}
-                      onFocus={() => {
-                        if (selectedCity && selectedNeighbourhood.length >= 1) {
-                          searchNeighbourhoods(selectedNeighbourhood)
-                          setShowNeighbourhoodSuggestions(true)
-                          setShowResultsPanel(false)
-                        } else if (selectedCity && neighbourhoodSuggestions.length > 0) {
-                          setShowNeighbourhoodSuggestions(true)
-                          setShowResultsPanel(false)
+                        
+                        // Don't search if the value matches the selected area (prevents dropdown from reopening)
+                        if (selectedArea && e.target.value === selectedArea) {
+                          console.log('🔄 Value matches selected area, not searching')
+                          setAreaSuggestions([])
+                          return
                         }
+                        
+                        // Debounce the search to prevent multiple rapid calls
+                        const timeoutId = setTimeout(() => {
+                          console.log('📞 Calling searchAreas with:', e.target.value)
+                          searchAreas(e.target.value)
+                        }, 300) // 300ms delay
+                        
+                        // Clear previous timeout
+                        if (window.areaSearchTimeout) {
+                          clearTimeout(window.areaSearchTimeout)
+                        }
+                        window.areaSearchTimeout = timeoutId
                       }}
-                      placeholder={
-                        !selectedCity 
-                          ? "Select a city first" 
-                          : isLoadingNeighbourhoods 
-                            ? "Loading neighbourhoods..." 
-                            : neighbourhoodSuggestions.length > 0 
-                              ? "Type to filter or select from list" 
-                              : "Type to search for areas or enter manually"
-                      }
+                      placeholder="Search for area/region (e.g., Ontario, GTA)"
                       className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20"
-                      required
-                      disabled={!selectedCity || isLoadingNeighbourhoods}
                     />
-                    {isLoadingNeighbourhoods && (
+                    {isLoadingAreas && (
                       <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
                         <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
                       </div>
                     )}
-                    {showNeighbourhoodSuggestions && neighbourhoodSuggestions.length > 0 && (
+                    {areaSuggestions.length > 0 && (
                       <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
-                        <div className="px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-200 bg-gray-50">
-                          Suggested Areas (you can also type manually)
-                        </div>
-                        {neighbourhoodSuggestions.map((neighbourhood) => (
+                        {areaSuggestions.map((area) => (
                           <button
-                            key={neighbourhood.place_id}
+                            key={area.id}
                             type="button"
                             className="w-full px-3 py-2 text-left hover:bg-blue-50 focus:bg-blue-50 border-b border-gray-100 last:border-b-0"
-                            onClick={() => handleNeighbourhoodSelect(neighbourhood)}
+                            onClick={() => handleAreaSelect(area)}
                           >
-                            <div className="font-medium text-blue-600">{neighbourhood.structured_formatting.main_text}</div>
-                            <div className="text-sm text-gray-500">{neighbourhood.structured_formatting.secondary_text}</div>
+                            <div className="font-medium text-blue-600">{area.name}</div>
+                            <div className="text-sm text-gray-500">{area.fullName}</div>
                           </button>
                         ))}
                       </div>
                     )}
-                    {showNeighbourhoodSuggestions && neighbourhoodSuggestions.length === 0 && (
-                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg p-3">
-                        <div className="text-sm text-gray-600">
-                          No suggestions found. You can type the neighbourhood name manually.
-                        </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                  <Label htmlFor="selectedMunicipality" className="text-sm font-medium text-gray-700">
+                    Municipality/City
+                </Label>
+                  <div className="relative" data-dropdown="municipality" ref={municipalityDropdownRef}>
+                    <Input
+                      id="selectedMunicipality"
+                      type="text"
+                      value={municipalityInputValue}
+                      onChange={(e) => {
+                        setMunicipalityInputValue(e.target.value)
+                        if (selectedArea && e.target.value.length >= 2) {
+                          searchMunicipalities(e.target.value)
+                        } else {
+                          setMunicipalitySuggestions([])
+                        }
+                      }}
+                      onFocus={() => {
+                        // Re-show cached municipalities when user focuses on the field
+                        if (selectedArea && cachedMunicipalities.length > 0) {
+                          console.log('🔄 Showing cached municipalities on focus:', cachedMunicipalities.length)
+                          setMunicipalitySuggestions(cachedMunicipalities)
+                        } else if (selectedArea && municipalitySuggestions.length === 0) {
+                          console.log('🔄 No cache found, loading municipalities for area:', selectedArea)
+                          loadMunicipalitiesForArea(selectedArea)
+                        }
+                      }}
+                      placeholder={selectedArea ? "Search for municipality/city" : "Select area first"}
+                      className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20"
+                      disabled={!selectedArea}
+                    />
+                    {isLoadingMunicipalities && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
                       </div>
                     )}
-                  </div>
-                  <p className="text-xs text-gray-500 mt-1">
-                    🗺️ Using OpenStreetMap data for comprehensive neighbourhood search. Results include official neighbourhoods, suburbs, and administrative areas.
-                  </p>
+                    {municipalitySuggestions.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                        {municipalitySuggestions.map((municipality) => (
+                          <button
+                            key={municipality.id}
+                            type="button"
+                            className="w-full px-3 py-2 text-left hover:bg-blue-50 focus:bg-blue-50 border-b border-gray-100 last:border-b-0"
+                            onClick={() => handleMunicipalitySelect(municipality)}
+                          >
+                            <div className="font-medium text-blue-600">{municipality.name}</div>
+                            <div className="text-sm text-gray-500">{municipality.fullName}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+              </div>
+            </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="selectedCommunity" className="text-sm font-medium text-gray-700">
+                    Community/Neighbourhood
+                  </Label>
+                  <div className="relative" data-dropdown="community" ref={communityDropdownRef}>
+                    <Input
+                      id="selectedCommunity"
+                      type="text"
+                      value={communityInputValue}
+                      onChange={(e) => {
+                        setCommunityInputValue(e.target.value)
+                        if (selectedMunicipality && e.target.value.length >= 2) {
+                          searchCommunities(e.target.value)
+                          } else {
+                          setCommunitySuggestions([])
+                        }
+                      }}
+                      onFocus={() => {
+                        // Re-show cached communities when user focuses on the field
+                        if (selectedMunicipality && cachedCommunities.length > 0) {
+                          console.log('🔄 Showing cached communities on focus:', cachedCommunities.length)
+                          setCommunitySuggestions(cachedCommunities)
+                        } else if (selectedMunicipality && communitySuggestions.length === 0) {
+                          console.log('🔄 No cache found, loading communities for municipality:', selectedMunicipality)
+                          loadCommunitiesForMunicipality(selectedMunicipality, selectedArea)
+                        }
+                      }}
+                      placeholder={selectedMunicipality ? "Search for community/neighbourhood" : "Select municipality first"}
+                      className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20"
+                      disabled={!selectedMunicipality}
+                    />
+                    {isLoadingCommunities && (
+                      <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                        <Loader2 className="w-4 h-4 animate-spin text-gray-400" />
+                      </div>
+                    )}
+                    {communitySuggestions.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-48 overflow-y-auto">
+                        {communitySuggestions.map((community) => (
+                          <button
+                            key={community.id}
+                            type="button"
+                            className="w-full px-3 py-2 text-left hover:bg-blue-50 focus:bg-blue-50 border-b border-gray-100 last:border-b-0"
+                            onClick={() => handleCommunitySelect(community)}
+                          >
+                            <div className="font-medium text-blue-600">{community.name}</div>
+                            <div className="text-sm text-gray-500">{community.fullName}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                        </div>
                 </div>
+
 
 
               </div>
 
-                             <div className="space-y-2">
-                 <Label htmlFor="selectedStreet" className="text-sm font-medium text-gray-700">
-                   Street *
-                 </Label>
+              <div className="space-y-2">
+                <Label htmlFor="selectedStreet" className="text-sm font-medium text-gray-700">
+                  Street *
+                </Label>
                                    <div className="relative" data-dropdown="street">
                   <Input
                     id="selectedStreet"
@@ -2382,50 +3244,59 @@ export function ManuallyAssignTerritoryModal({
                       setStreetInputValue(e.target.value)
                       setNoStreetsFound(false)
                       
-                      // If we have a neighbourhood selected, show suggestions immediately
-                      if (selectedNeighbourhood && e.target.value.length >= 1) {
-                        console.log('Calling searchStreets with:', e.target.value)
-                        searchStreets(e.target.value)
+                      // Search within selected community
+                      if (selectedCommunity && e.target.value.length >= 1) {
+                        console.log('Searching streets within community hierarchy:', selectedCommunity)
+                        searchStreetsInCommunity(e.target.value, selectedCommunity, selectedMunicipality, selectedArea)
                         setShowStreetSuggestions(true)
                         setShowResultsPanel(false)
-                      } else if (selectedNeighbourhood && e.target.value.length === 0) {
-                        // If user clears the input, show all available streets
-                        console.log('Input cleared, showing all streets')
-                        if (streetSuggestions.length > 0) {
+                      } else if (e.target.value.length === 0) {
+                        // If user clears the input, show cached streets
+                        console.log('Input cleared, showing cached streets')
+                        if (cachedStreets.length > 0) {
+                          setStreetSuggestions(cachedStreets)
+                          setShowStreetSuggestions(true)
+                        } else if (streetSuggestions.length > 0) {
                           setShowStreetSuggestions(true)
                         } else {
                           setShowStreetSuggestions(false)
                         }
                         setShowResultsPanel(false)
                       } else {
-                        console.log('Not calling searchStreets - conditions not met')
+                        console.log('Not calling street search - conditions not met')
                         setShowStreetSuggestions(false)
                         setShowResultsPanel(false)
                       }
                     }}
                     onFocus={() => {
-                      if (selectedNeighbourhood && streetInputValue.length >= 1) {
-                        searchStreets(streetInputValue)
+                      // Show cached streets when focusing on the field
+                      if (selectedCommunity && cachedStreets.length > 0) {
+                        console.log('🔄 Showing cached streets on focus (Community level):', cachedStreets.length)
+                        setStreetSuggestions(cachedStreets)
                         setShowStreetSuggestions(true)
                         setShowResultsPanel(false)
-                      } else if (selectedNeighbourhood && streetSuggestions.length > 0) {
+                      } else if (selectedCommunity && streetInputValue.length >= 1) {
+                        searchStreetsInCommunity(streetInputValue, selectedCommunity, selectedMunicipality, selectedArea)
+                        setShowStreetSuggestions(true)
+                        setShowResultsPanel(false)
+                      } else if (selectedCommunity && streetSuggestions.length > 0) {
                         setShowStreetSuggestions(true)
                         setShowResultsPanel(false)
                       }
                     }}
                     placeholder={
-                      !selectedNeighbourhood 
-                        ? "Select a neighbourhood first" 
+                      !selectedCommunity 
+                        ? "Select a community first" 
                         : isLoadingStreets 
                           ? "Loading streets..." 
                           : streetSuggestions.length > 0 
-                            ? "Type to filter or select from list" 
+                            ? "Type to filter residential streets in community" 
                             : noStreetsFound 
-                              ? "No streets found - try manual search" 
-                              : "Search for a street"
+                              ? "No residential streets found in community" 
+                              : "Search residential streets in community"
                     }
                     className="h-10 w-full border-gray-300 focus:border-blue-500 focus:ring-blue-500/20"
-                    disabled={!selectedNeighbourhood || isLoadingStreets}
+                    disabled={!selectedCommunity || isLoadingStreets}
                   />
                   {isLoadingStreets && (
                     <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -2453,7 +3324,7 @@ export function ManuallyAssignTerritoryModal({
                   {noStreetsFound && !isLoadingStreets && showStreetSuggestions && (
                     <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg">
                       <div className="px-3 py-2 text-xs font-medium text-gray-500 border-b border-gray-200 bg-gray-50">
-                        No streets found for {selectedNeighbourhood}
+                        No streets found for {selectedMunicipality}
                       </div>
                       <div className="px-3 py-2 text-sm text-gray-600">
                         Try searching manually or select a different area.
@@ -2462,16 +3333,18 @@ export function ManuallyAssignTerritoryModal({
                   )}
                 </div>
                 
+
+                
                 {/* Load Manually Button - positioned below and to the right */}
-                {selectedNeighbourhood && !isLoadingStreets && (
+                {selectedMunicipality && !isLoadingStreets && (
                   <div className="flex justify-end mt-2">
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
                       onClick={() => {
-                        console.log('🔄 Loading streets manually for neighbourhood:', selectedNeighbourhood)
-                        loadStreetsForNeighbourhood(selectedNeighbourhood)
+                        console.log('🔄 Loading streets manually for municipality:', selectedMunicipality)
+                        loadStreetsForNeighbourhood(selectedMunicipality)
                       }}
                       className="text-xs px-3 py-1 h-8 border-blue-300 text-blue-600 hover:bg-blue-50"
                     >
@@ -2480,6 +3353,75 @@ export function ManuallyAssignTerritoryModal({
                     </Button>
                   </div>
                 )}
+              </div>
+
+              {/* Geographic Hierarchy Status */}
+              <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <h4 className="text-sm font-medium text-gray-700 mb-3">Geographic Hierarchy Status</h4>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                  <div className={`p-2 rounded ${selectedArea ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                    <div className="font-medium">Area</div>
+                    <div className="truncate">{selectedArea || 'Not selected'}</div>
+                  </div>
+                  <div className={`p-2 rounded ${selectedMunicipality ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                    <div className="font-medium">Municipality</div>
+                    <div className="truncate">{selectedMunicipality || 'Not selected'}</div>
+                  </div>
+                  <div className={`p-2 rounded ${selectedCommunity ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600'}`}>
+                    <div className="font-medium">Community</div>
+                    <div className="truncate">{selectedCommunity || 'Not selected'}</div>
+                  </div>
+
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      console.log('🔍 Validate Hierarchy button clicked!')
+                      console.log('📊 Current selections:')
+                      console.log('  - Area:', selectedArea)
+                      console.log('  - Municipality:', selectedMunicipality)
+                      console.log('  - Community:', selectedCommunity)
+
+                      
+                      const validation = validateGeographicHierarchy()
+                      console.log('✅ Validation result:', validation)
+                      
+                      if (validation.errors.length > 0) {
+                        console.log('❌ Validation errors found:', validation.errors)
+                        toast.error(`Validation failed: ${validation.errors.join(', ')}`)
+                      } else if (validation.warnings.length > 0) {
+                        console.log('⚠️ Validation warnings found:', validation.warnings)
+                        toast.warning(`Validation warnings: ${validation.warnings.join(', ')}`)
+                      } else {
+                        console.log('🎉 All validations passed!')
+                        toast.success('Geographic hierarchy is valid!')
+                      }
+                    }}
+                    className="text-xs"
+                  >
+                    Validate Hierarchy
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedArea("")
+                      setAreaInputValue("")
+                      setSelectedMunicipality("")
+                      setMunicipalityInputValue("")
+                      setSelectedCommunity("")
+                      setCommunityInputValue("")
+                      toast.info('Geographic hierarchy cleared')
+                    }}
+                    className="text-xs text-red-600 hover:text-red-700"
+                  >
+                    Clear All
+                  </Button>
+                </div>
               </div>
 
               {/* Selected Streets */}
@@ -2556,6 +3498,122 @@ export function ManuallyAssignTerritoryModal({
                   )}
                 </div>
               )}
+
+              {/* Advanced Detection Settings */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                <h4 className="text-sm font-medium text-blue-800 mb-3">Advanced Detection Settings</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                  <div className="space-y-2">
+                    <Label htmlFor="searchRadius" className="text-xs font-medium text-blue-700">
+                      Search Radius (meters)
+                    </Label>
+                    <Input
+                      id="searchRadius"
+                      type="number"
+                      value={searchRadius}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value)
+                        if (!isNaN(value) && value > 0) {
+                          setSearchRadius(value)
+                        }
+                      }}
+                      min="50"
+                      max="1000"
+                      step="50"
+                      className="h-8 text-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500/20"
+                    />
+                    <div className="text-xs text-blue-600">
+                      Current: {searchRadius}m
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="maxDistanceFromStreet" className="text-xs font-medium text-blue-700">
+                      Max Distance from Street (km)
+                    </Label>
+                    <Input
+                      id="maxDistanceFromStreet"
+                      type="number"
+                      value={maxDistanceFromStreet}
+                      onChange={(e) => {
+                        const value = parseFloat(e.target.value)
+                        if (!isNaN(value) && value > 0) {
+                          setMaxDistanceFromStreet(value)
+                        }
+                      }}
+                      min="0.1"
+                      max="5.0"
+                      step="0.1"
+                      className="h-8 text-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500/20"
+                    />
+                    <div className="text-xs text-blue-600">
+                      Current: {maxDistanceFromStreet}km
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="buildingTypeFilter" className="text-xs font-medium text-blue-700">
+                      Building Type Filter
+                    </Label>
+                    <Select value={buildingTypeFilter} onValueChange={setBuildingTypeFilter}>
+                      <SelectTrigger className="h-8 text-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="residential">Residential</SelectItem>
+                        <SelectItem value="house">House</SelectItem>
+                        <SelectItem value="apartments">Apartments</SelectItem>
+                        <SelectItem value="detached">Detached</SelectItem>
+                        <SelectItem value="semi_detached_house">Semi-Detached</SelectItem>
+                        <SelectItem value="terrace">Terrace</SelectItem>
+                        <SelectItem value="bungalow">Bungalow</SelectItem>
+                        <SelectItem value="duplex">Duplex</SelectItem>
+                        <SelectItem value="townhouse">Townhouse</SelectItem>
+                        <SelectItem value="condo">Condo</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="addressValidationLevel" className="text-xs font-medium text-blue-700">
+                      Address Validation Level
+                    </Label>
+                    <Select value={addressValidationLevel} onValueChange={setAddressValidationLevel}>
+                      <SelectTrigger className="h-8 text-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="strict">Strict</SelectItem>
+                        <SelectItem value="moderate">Moderate</SelectItem>
+                        <SelectItem value="loose">Loose</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="coordinatePrecision" className="text-xs font-medium text-blue-700">
+                      Coordinate Precision
+                    </Label>
+                    <Select value={coordinatePrecision} onValueChange={setCoordinatePrecision}>
+                      <SelectTrigger className="h-8 text-xs border-blue-300 focus:border-blue-500 focus:ring-blue-500/20">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="high">High (6+ decimals)</SelectItem>
+                        <SelectItem value="medium">Medium (5 decimals)</SelectItem>
+                        <SelectItem value="low">Low (4 decimals)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="mt-3 p-2 bg-blue-100 rounded border border-blue-300">
+                  <div className="text-xs text-blue-800 font-medium mb-1">Current Settings Summary:</div>
+                  <div className="text-xs text-blue-700">
+                    🔍 Search Radius: {searchRadius}m | 📏 Max Distance: {maxDistanceFromStreet}km | 🏢 Type: {buildingTypeFilter} | ✅ Validation: {addressValidationLevel} | 📍 Precision: {coordinatePrecision}
+                  </div>
+                </div>
+              </div>
 
               {/* Detected Residents Summary */}
               {detectedResidents.length > 0 && (
@@ -2669,13 +3727,102 @@ export function ManuallyAssignTerritoryModal({
                       </div>
                     </div>
                   )}
+
+                  {/* Territory Map Visualization */}
+                  {generatedPolygon && detectedResidents.length > 0 && isGoogleMapsApiLoaded && (
+                    <div className="mt-4 pt-3 border-t border-green-200">
+                      <div className="text-xs text-green-700 mb-2">
+                        <div className="flex items-center gap-2">
+                          <Map className="w-3 h-3" />
+                          <span className="font-medium">Territory Map Visualization</span>
+                        </div>
+                      </div>
+                      
+                      <div className="relative h-64 w-full rounded-lg overflow-hidden border border-green-200">
+                        <GoogleMap
+                          mapContainerStyle={{ width: '100%', height: '100%' }}
+                          center={{
+                            lat: detectedResidents[0]?.lat || 43.6532,
+                            lng: detectedResidents[0]?.lng || -79.3832
+                          }}
+                          zoom={15}
+                          options={{
+                            mapTypeId: 'roadmap',
+                            streetViewControl: false,
+                            mapTypeControl: false,
+                            fullscreenControl: false,
+                            zoomControl: true,
+                            gestureHandling: 'cooperative',
+                            styles: [
+                              {
+                                featureType: 'poi',
+                                elementType: 'labels',
+                                stylers: [{ visibility: 'off' }]
+                              }
+                            ]
+                          }}
+                        >
+                          {/* Territory Polygon */}
+                          <Polygon
+                            paths={generatedPolygon.map((coord: [number, number]) => ({
+                              lat: coord[1],
+                              lng: coord[0]
+                            }))}
+                            options={{
+                              fillColor: '#10B981',
+                              fillOpacity: 0.2,
+                              strokeColor: '#10B981',
+                              strokeWeight: 3,
+                              strokeOpacity: 0.8,
+                            }}
+                          />
+
+                          {/* Building Markers */}
+                          {detectedResidents.map((resident, index) => (
+                            <Marker
+                              key={resident.id}
+                              position={{
+                                lat: resident.lat,
+                                lng: resident.lng
+                              }}
+                              icon={{
+                                path: window.google?.maps?.SymbolPath?.CIRCLE || 0,
+                                scale: 8,
+                                fillColor: '#3B82F6',
+                                fillOpacity: 0.8,
+                                strokeWeight: 2,
+                                strokeColor: '#FFFFFF',
+                              }}
+                              title={`${resident.name} - ${resident.address}`}
+                              onClick={() => {
+                                // Show info window or highlight resident
+                                console.log('Selected resident:', resident)
+                              }}
+                            />
+                          ))}
+                        </GoogleMap>
+                        
+                        {/* Map Legend */}
+                        <div className="absolute bottom-2 left-2 bg-white bg-opacity-90 rounded-lg p-2 text-xs">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="w-3 h-3 bg-green-500 bg-opacity-20 border-2 border-green-500 rounded"></div>
+                            <span>Territory Boundary</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                            <span>Residential Buildings ({detectedResidents.length})</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
 
             <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
               <div className="text-sm text-blue-800">
-                <strong>Step 1:</strong> Enter territory information and select the geographical area. When you select a city, neighbourhoods will be automatically loaded. You can then search for streets within the selected neighbourhood. Residents will be automatically detected from the selected streets.
+                <strong>Step 1:</strong> Enter territory information and select the geographical hierarchy. Start with Area/Region, then Municipality/City, then Community/Neighbourhood. Finally, search for streets within the selected area. Residents will be automatically detected from the selected streets.
               </div>
             </div>
 
@@ -2683,7 +3830,7 @@ export function ManuallyAssignTerritoryModal({
               <Button
                 type="submit"
                 className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5"
-                disabled={!territoryName.trim() || !selectedCity || !selectedNeighbourhood || selectedStreets.length === 0 || detectedResidents.length === 0 || isSavingTerritory}
+                disabled={!territoryName.trim() || !selectedMunicipality || selectedStreets.length === 0 || detectedResidents.length === 0 || isSavingTerritory}
               >
                 {isSavingTerritory ? (
                   <>
@@ -2722,7 +3869,12 @@ export function ManuallyAssignTerritoryModal({
                 </div>
                 <div>
                   <span className="font-medium text-gray-700">Location:</span>
-                  <span className="ml-2 text-gray-900">{selectedCity} - {selectedNeighbourhood}</span>
+                  <span className="ml-2 text-gray-900">
+                    {selectedArea && `${selectedArea} > `}
+                    {selectedMunicipality}
+                    {selectedCommunity && ` > ${selectedCommunity}`}
+                  
+                  </span>
                 </div>
                 {/* selectedPostalCode && (
                   <div>
@@ -2756,8 +3908,8 @@ export function ManuallyAssignTerritoryModal({
               <div className="bg-green-50 rounded-lg p-3 mb-4 border border-green-100">
                 <div className="text-sm font-medium text-green-700 mb-1">Territory Saved as Draft</div>
                 <div className="text-xs text-gray-600">You can assign it now or leave it for later assignment</div>
-              </div>
-
+                </div>
+                
               {/* Assignment Type Selection */}
               <div>
                 <label className="text-sm font-medium text-gray-700 mb-3 block">Assignment Type</label>
@@ -2776,7 +3928,7 @@ export function ManuallyAssignTerritoryModal({
                     <Label htmlFor="team" className="flex items-center gap-2 cursor-pointer">
                       <Users className="h-4 w-4" />
                       <span>Team</span>
-                    </Label>
+                  </Label>
                   </div>
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="individual" id="individual" />
@@ -2800,10 +3952,14 @@ export function ManuallyAssignTerritoryModal({
                     onChange={(e) => {
                       const query = e.target.value
                       setAssignmentSearchQuery(query)
-                      if (query.trim()) {
-                        searchAssignment(query, assignmentType)
-                      } else {
-                        setAssignmentSearchResults([])
+                      
+                      // Only trigger search if this is not a selection update
+                      if (!isSelectionUpdate) {
+                        if (query.trim()) {
+                          searchAssignment(query, assignmentType)
+                        } else {
+                          setAssignmentSearchResults([])
+                        }
                       }
                     }}
                     className="border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20 bg-white pr-10"
@@ -2820,9 +3976,12 @@ export function ManuallyAssignTerritoryModal({
                       <div
                         key={result._id || result.id}
                         onClick={() => {
+                          setIsSelectionUpdate(true) // Mark this as a selection update
                           setSelectedAssignment(result)
                           setAssignmentSearchQuery(assignmentType === "team" ? result.name : `${result.name} (${result.email})`)
                           setAssignmentSearchResults([])
+                          // Reset the flag after a short delay to allow the input update to complete
+                          setTimeout(() => setIsSelectionUpdate(false), 100)
                         }}
                         className="p-3 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
                       >
@@ -3068,9 +4227,9 @@ export function ManuallyAssignTerritoryModal({
               <Button
                 type="submit"
                 className="flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-2.5"
-                disabled={!selectedAssignment || !assignedDate || isSavingTerritory}
+                disabled={!selectedAssignment || !assignedDate || !savedTerritoryId || isAssigningTerritory}
               >
-                {isSavingTerritory ? (
+                {isAssigningTerritory ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Assigning...
@@ -3087,7 +4246,7 @@ export function ManuallyAssignTerritoryModal({
                 variant="outline"
                 onClick={handleStep2Submit}
                 className="px-8 border-gray-300 hover:bg-gray-50 py-2.5"
-                disabled={isSavingTerritory}
+                disabled={isAssigningTerritory}
               >
                 Skip for Now
               </Button>
