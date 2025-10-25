@@ -1,23 +1,13 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import {
-  GoogleMap,
-  Marker,
-  Polygon,
-  useJsApiLoader,
-} from "@react-google-maps/api";
+import { GoogleMap, Marker, Polygon } from "@react-google-maps/api";
+import { useGoogleMaps } from "@/components/google-maps-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MapPin, Grid3X3, X, Loader2 } from "lucide-react";
 import { CommunityBoundary } from "@/lib/freeLocationData";
 import { GridBlock, generateGridBlocks } from "@/lib/gridSubdivision";
-
-const libraries: ("drawing" | "geometry" | "places")[] = [
-  "drawing",
-  "geometry",
-  "places",
-];
 
 interface PropertyMarker {
   id: string;
@@ -73,11 +63,7 @@ export function ZoneMap({
   // No static zone boundaries - will be populated dynamically
   const zoneBoundaries: ZoneBoundary[] = [];
 
-  const { isLoaded } = useJsApiLoader({
-    id: "google-map-script",
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-    libraries,
-  });
+  const { isLoaded } = useGoogleMaps();
 
   const onLoad = useCallback((map: google.maps.Map) => {
     setMap(map);

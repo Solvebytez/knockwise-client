@@ -2,12 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 
-import {
-  GoogleMap,
-  useJsApiLoader,
-  Marker,
-  Polygon,
-} from "@react-google-maps/api";
+import { GoogleMap, Marker, Polygon } from "@react-google-maps/api";
+import { useGoogleMaps } from "@/components/google-maps-provider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -51,12 +47,6 @@ import { useRouter } from "next/navigation";
 import { PropertyDetailModal } from "./property-detail-modal";
 import { useQueryClient } from "@tanstack/react-query";
 
-const libraries: ("drawing" | "geometry" | "places")[] = [
-  "drawing",
-  "geometry",
-  "places",
-];
-
 interface TerritoryMapViewProps {
   territoryId: string;
 }
@@ -76,6 +66,7 @@ interface Property {
     | "not-interested";
   lastVisited?: string;
   notes?: string;
+  dataSource?: "AUTO" | "MANUAL";
   lastUpdatedBy?:
     | string
     | {
@@ -159,20 +150,53 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
   });
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isAddingResident, setIsAddingResident] = useState(false);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [addFormData, setAddFormData] = useState({
+    address: "",
+    houseNumber: "",
+    longitude: "",
+    latitude: "",
+    status: "not-visited" as any,
+    lastVisited: "",
+    notes: "",
+    phone: "",
+    email: "",
+    ownerName: "",
+    ownerPhone: "",
+    ownerEmail: "",
+    ownerMailingAddress: "",
+  });
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("All Status");
+  const [dataSourceFilter, setDataSourceFilter] =
+    useState<string>("All Sources");
   const [sortBy, setSortBy] = useState<string>("Sequential");
   const [currentPage, setCurrentPage] = useState(1);
   const [mapViewType, setMapViewType] = useState<
     "roadmap" | "satellite" | "hybrid" | "terrain"
   >("hybrid");
+
+  // Validation states
+  const [isValidating, setIsValidating] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [coordinatesInsideZone, setCoordinatesInsideZone] = useState(false);
+  const [fieldsSynchronized, setFieldsSynchronized] = useState(false);
+
+  // Edit form validation states
+  const [isEditValidating, setIsEditValidating] = useState(false);
+  const [editValidationErrors, setEditValidationErrors] = useState<string[]>(
+    []
+  );
+  const [editCoordinatesInsideZone, setEditCoordinatesInsideZone] =
+    useState(false);
+  const [editFieldsSynchronized, setEditFieldsSynchronized] = useState(false);
+  const [isEditGettingLocation, setIsEditGettingLocation] = useState(false);
+
   const mapRef = useRef<google.maps.Map | null>(null);
 
-  const { isLoaded, loadError } = useJsApiLoader({
-    id: "google-map-script",
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-    libraries,
-  });
+  const { isLoaded, loadError } = useGoogleMaps();
 
   // Fetch territory and properties data
   useEffect(() => {
@@ -223,6 +247,13 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
       );
     }
 
+    // Apply data source filter
+    if (dataSourceFilter && dataSourceFilter !== "All Sources") {
+      filtered = filtered.filter(
+        (property) => property.dataSource === dataSourceFilter
+      );
+    }
+
     // Apply sorting
     if (sortBy === "Sequential") {
       filtered = filtered.sort((a, b) => a.houseNumber - b.houseNumber);
@@ -237,7 +268,7 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
     }
 
     setFilteredProperties(filtered);
-  }, [properties, statusFilter, sortBy]);
+  }, [properties, statusFilter, dataSourceFilter, sortBy]);
 
   // Update status counts and statistics whenever properties change
   useEffect(() => {
@@ -423,12 +454,22 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
     setIsDetailModalOpen(false);
   };
 
-  const handleFormChange = (field: string, value: string) => {
+  const handleFormChange = async (field: string, value: string) => {
     if (isUpdatingResident) return; // Prevent changes during update
     setEditFormData((prev) => ({
       ...prev,
       [field]: value,
     }));
+
+    // NO automatic synchronization - users must manually click Search button
+    // This prevents unwanted address replacement and gives full control
+    // Users can:
+    // 1. Type/paste addresses freely without interference
+    // 2. Click Search button to geocode address → coordinates
+    // 3. Click Search button to reverse geocode coordinates → address
+
+    // Only validate form (no synchronization)
+    setTimeout(() => validateEditForm(), 500);
   };
 
   const handleUpdateResident = async () => {
@@ -436,6 +477,9 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
 
     try {
       setIsUpdatingResident(true);
+
+      // No validation needed - basic info update is allowed without status fields
+      // Users can update address, coordinates, contact info independently
 
       const updateData = {
         address: editFormData.address,
@@ -585,6 +629,846 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
       }
     } finally {
       setIsUpdatingResident(false);
+    }
+  };
+
+  const handleOpenAddModal = () => {
+    setIsAddModalOpen(true);
+    setSelectedProperty(null); // Close any selected property
+  };
+
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+    // Reset form data
+    setAddFormData({
+      address: "",
+      houseNumber: "",
+      longitude: "",
+      latitude: "",
+      status: "not-visited",
+      lastVisited: "",
+      notes: "",
+      phone: "",
+      email: "",
+      ownerName: "",
+      ownerPhone: "",
+      ownerEmail: "",
+      ownerMailingAddress: "",
+    });
+  };
+
+  const handleAddFormChange = async (field: string, value: string) => {
+    if (isAddingResident) return; // Prevent changes during submit
+
+    setAddFormData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+
+    // NO automatic synchronization - users must manually click Search button
+    // This prevents unwanted address replacement and gives full control
+    // Users can:
+    // 1. Type/paste addresses freely without interference
+    // 2. Click Search button to geocode address → coordinates
+    // 3. Click Search button to reverse geocode coordinates → address
+
+    // Only validate form (no synchronization)
+    setTimeout(() => validateForm(), 500);
+  };
+
+  // Find exact coordinates using Places API
+  const findExactCoordinates = async (formType: "add" | "edit") => {
+    const address =
+      formType === "add" ? addFormData.address : editFormData.address;
+
+    if (!address.trim()) {
+      toast.error("Please enter an address");
+      return;
+    }
+
+    try {
+      console.log("🔍 Finding exact coordinates for address:", address);
+
+      // Create Places service
+      const service = new window.google.maps.places.PlacesService(
+        document.createElement("div")
+      );
+
+      // Use findPlaceFromQuery to get exact coordinates
+      service.findPlaceFromQuery(
+        {
+          query: address,
+          fields: ["place_id", "geometry", "formatted_address"],
+        },
+        (results, status) => {
+          if (
+            status === window.google.maps.places.PlacesServiceStatus.OK &&
+            results &&
+            results.length
+          ) {
+            const place = results[0];
+
+            // Check if geometry and location exist
+            if (!place.geometry || !place.geometry.location) {
+              toast.error("No location data found for this address");
+              return;
+            }
+
+            const lat = place.geometry.location.lat();
+            const lng = place.geometry.location.lng();
+            const formattedAddress = place.formatted_address || address;
+
+            console.log("🎯 Places API Results:");
+            console.log("📍 Place ID:", place.place_id);
+            console.log("📍 Address:", formattedAddress);
+            console.log("📍 Coordinates:", lat, lng);
+
+            // Update the form with exact coordinates
+            if (formType === "add") {
+              setAddFormData((prev) => ({
+                ...prev,
+                latitude: lat.toString(),
+                longitude: lng.toString(),
+                address: formattedAddress,
+                houseNumber: formattedAddress.match(/^(\d+)/)?.[1] || "",
+              }));
+            } else {
+              setEditFormData((prev) => ({
+                ...prev,
+                latitude: lat.toString(),
+                longitude: lng.toString(),
+                address: formattedAddress,
+                houseNumber: formattedAddress.match(/^(\d+)/)?.[1] || "",
+              }));
+            }
+
+            toast.success(`✅ Exact coordinates found: ${lat}, ${lng}`);
+          } else {
+            console.error("❌ Places API Error:", status);
+            toast.error(`Failed to find coordinates: ${status}`);
+          }
+        }
+      );
+    } catch (error) {
+      console.error("❌ Error finding exact coordinates:", error);
+      toast.error("Error finding exact coordinates");
+    }
+  };
+
+  const handleMapClick = async (event: google.maps.MapMouseEvent) => {
+    if (isAddModalOpen && event.latLng) {
+      const lat = event.latLng.lat();
+      const lng = event.latLng.lng();
+
+      setAddFormData((prev) => ({
+        ...prev,
+        latitude: lat.toString(),
+        longitude: lng.toString(),
+      }));
+
+      // Trigger synchronization and validation
+      await synchronizeFields("coordinates");
+      setTimeout(() => validateForm(), 500);
+
+      toast.info(`Coordinates captured: ${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    }
+  };
+
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser");
+      return;
+    }
+
+    setIsGettingLocation(true);
+    toast.info("Getting your location...");
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        // Update coordinates first
+        setAddFormData((prev) => ({
+          ...prev,
+          latitude: lat.toString(),
+          longitude: lng.toString(),
+        }));
+
+        // Get address using reverse geocoding
+        try {
+          const geocoder = new window.google.maps.Geocoder();
+          const result = await geocoder.geocode({
+            location: { lat, lng },
+          });
+
+          if (result.results && result.results.length > 0) {
+            const address = result.results[0].formatted_address;
+
+            // Extract house number from address
+            const houseNumberMatch = address.match(/^(\d+)/);
+            const houseNumber = houseNumberMatch ? houseNumberMatch[1] : "";
+
+            // Update form data with address and house number
+            setAddFormData((prev) => ({
+              ...prev,
+              address: address,
+              houseNumber: houseNumber,
+            }));
+
+            toast.success(
+              `Location captured: ${lat.toFixed(6)}, ${lng.toFixed(
+                6
+              )}\nAddress: ${address}`
+            );
+          } else {
+            toast.success(
+              `Location captured: ${lat.toFixed(6)}, ${lng.toFixed(
+                6
+              )}\nAddress not found`
+            );
+          }
+        } catch (geocodeError) {
+          console.error("Geocoding error:", geocodeError);
+          toast.success(
+            `Location captured: ${lat.toFixed(6)}, ${lng.toFixed(
+              6
+            )}\nAddress lookup failed`
+          );
+        }
+
+        setIsGettingLocation(false);
+
+        // Trigger validation after setting location
+        setTimeout(() => validateForm(), 500);
+
+        // Optional: Center map on current location
+        if (mapRef.current) {
+          mapRef.current.panTo({ lat, lng });
+          mapRef.current.setZoom(18);
+        }
+      },
+      (error) => {
+        console.error("Error getting location:", error);
+        setIsGettingLocation(false);
+
+        if (error.code === error.PERMISSION_DENIED) {
+          toast.error(
+            "Location permission denied. Please enable location access in your browser."
+          );
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          toast.error("Location information unavailable");
+        } else if (error.code === error.TIMEOUT) {
+          toast.error("Location request timed out");
+        } else {
+          toast.error("Failed to get your location");
+        }
+      },
+      {
+        enableHighAccuracy: true, // Use GPS for better accuracy
+        timeout: 10000, // 10 seconds timeout
+        maximumAge: 0, // Don't use cached location
+      }
+    );
+  };
+
+  // Validation functions
+  const validateCoordinatesInsideZone = async (
+    lat: number,
+    lng: number
+  ): Promise<boolean> => {
+    if (!territory?.boundary) return false;
+
+    try {
+      // Use Google Maps geometry library to check if point is inside polygon
+      const point = new window.google.maps.LatLng(lat, lng);
+      const polygon = new window.google.maps.Polygon({
+        paths: territory.boundary.coordinates[0].map(
+          (coord: [number, number]) =>
+            new window.google.maps.LatLng(coord[1], coord[0])
+        ),
+      });
+
+      return window.google.maps.geometry.poly.containsLocation(point, polygon);
+    } catch (error) {
+      console.error("Error validating coordinates inside zone:", error);
+      return false;
+    }
+  };
+
+  const synchronizeFields = async (
+    sourceField: "address" | "coordinates"
+  ): Promise<void> => {
+    setIsValidating(true);
+    setValidationErrors([]);
+
+    try {
+      if (sourceField === "address" && addFormData.address) {
+        // Use Places API for exact coordinates (same as Test Address)
+        console.log("🔍 Places API geocoding address:", addFormData.address);
+
+        // Create Places service
+        const service = new window.google.maps.places.PlacesService(
+          document.createElement("div")
+        );
+
+        // Use findPlaceFromQuery to get exact coordinates
+        service.findPlaceFromQuery(
+          {
+            query: addFormData.address,
+            fields: ["place_id", "geometry", "formatted_address"],
+          },
+          (results, status) => {
+            if (
+              status === window.google.maps.places.PlacesServiceStatus.OK &&
+              results &&
+              results.length
+            ) {
+              const place = results[0];
+
+              // Check if geometry and location exist
+              if (!place.geometry || !place.geometry.location) {
+                toast.error("No location data found for this address");
+                return;
+              }
+
+              const lat = place.geometry.location.lat();
+              const lng = place.geometry.location.lng();
+              const address = place.formatted_address || addFormData.address;
+
+              console.log("🎯 Places API Results for Address field:");
+              console.log("📍 Place ID:", place.place_id);
+              console.log("📍 Address:", address);
+              console.log("📍 Coordinates:", lat, lng);
+
+              // Update form with exact coordinates
+              setAddFormData((prev) => ({
+                ...prev,
+                latitude: lat.toString(),
+                longitude: lng.toString(),
+                address: address,
+                houseNumber: address.match(/^(\d+)/)?.[1] || "",
+              }));
+
+              toast.success(`✅ Exact coordinates found: ${lat}, ${lng}`);
+            } else {
+              console.error("❌ Places API Error:", status);
+              toast.error(`Failed to find coordinates: ${status}`);
+            }
+          }
+        );
+      } else if (
+        sourceField === "coordinates" &&
+        addFormData.latitude &&
+        addFormData.longitude
+      ) {
+        // Reverse geocode coordinates to get address
+        const lat = parseFloat(addFormData.latitude);
+        const lng = parseFloat(addFormData.longitude);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const geocoder = new window.google.maps.Geocoder();
+          const result = await geocoder.geocode({
+            location: { lat, lng },
+            region: "ca",
+          });
+
+          if (result.results && result.results.length > 0) {
+            // Prefer rooftop accuracy
+            const preciseResult =
+              result.results.find(
+                (r) => r.geometry.location_type === "ROOFTOP"
+              ) || result.results[0];
+
+            const address = preciseResult.formatted_address;
+
+            // Extract the street number safely from address_components
+            const houseNumberComponent = preciseResult.address_components.find(
+              (c) => c.types.includes("street_number")
+            );
+            const houseNumber = houseNumberComponent
+              ? houseNumberComponent.long_name
+              : "";
+
+            setAddFormData((prev) => ({
+              ...prev,
+              address: address,
+              houseNumber: houseNumber,
+            }));
+          } else {
+            toast.warning(
+              "No address found for these coordinates. Try moving the pin slightly."
+            );
+          }
+        }
+      }
+
+      setFieldsSynchronized(true);
+    } catch (error: any) {
+      console.error("Error synchronizing fields:", error);
+
+      // Provide specific error messages based on the error type
+      let errorMessage = "Failed to synchronize location fields";
+      if (error?.code === "ZERO_RESULTS") {
+        errorMessage =
+          "Address not found. Please check the address or enter coordinates manually.";
+      } else if (error?.code === "OVER_QUERY_LIMIT") {
+        errorMessage =
+          "Geocoding service limit reached. Please try again later.";
+      } else if (error?.code === "REQUEST_DENIED") {
+        errorMessage = "Geocoding request denied. Please check your API key.";
+      } else if (error?.code === "INVALID_REQUEST") {
+        errorMessage = "Invalid address format. Please check your input.";
+      }
+
+      setValidationErrors((prev) => [...prev, errorMessage]);
+      setFieldsSynchronized(false);
+
+      // Show user-friendly toast message
+      toast.error(errorMessage);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const validateForm = async (): Promise<boolean> => {
+    setIsValidating(true);
+    setValidationErrors([]);
+
+    const errors: string[] = [];
+
+    try {
+      // Check required fields
+      if (!addFormData.address.trim()) errors.push("Address is required");
+      if (!addFormData.houseNumber.trim())
+        errors.push("House number is required");
+      if (!addFormData.longitude.trim()) errors.push("Longitude is required");
+      if (!addFormData.latitude.trim()) errors.push("Latitude is required");
+
+      // Validate coordinates format
+      if (addFormData.latitude && addFormData.longitude) {
+        const lat = parseFloat(addFormData.latitude);
+        const lng = parseFloat(addFormData.longitude);
+
+        if (isNaN(lat) || isNaN(lng)) {
+          errors.push("Invalid coordinates format");
+        } else if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          errors.push("Coordinates are out of valid range");
+        }
+      }
+
+      setValidationErrors(errors);
+      return errors.length === 0;
+    } catch (error) {
+      console.error("Error validating form:", error);
+      setValidationErrors(["Validation error occurred"]);
+      return false;
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const isFormValid = (): boolean => {
+    return (
+      addFormData.address.trim() !== "" &&
+      addFormData.houseNumber.trim() !== "" &&
+      addFormData.longitude.trim() !== "" &&
+      addFormData.latitude.trim() !== ""
+    );
+  };
+
+  // Edit form validation functions
+  const validateEditCoordinatesInsideZone = async (
+    lat: number,
+    lng: number
+  ): Promise<boolean> => {
+    if (!territory?.boundary) return false;
+
+    try {
+      // Use Google Maps geometry library to check if point is inside polygon
+      const point = new window.google.maps.LatLng(lat, lng);
+      const polygon = new window.google.maps.Polygon({
+        paths: territory.boundary.coordinates[0].map(
+          (coord: [number, number]) =>
+            new window.google.maps.LatLng(coord[1], coord[0])
+        ),
+      });
+
+      return window.google.maps.geometry.poly.containsLocation(point, polygon);
+    } catch (error) {
+      console.error("Error validating edit coordinates inside zone:", error);
+      return false;
+    }
+  };
+
+  const synchronizeEditFields = async (
+    sourceField: "address" | "coordinates"
+  ): Promise<void> => {
+    setIsEditValidating(true);
+    setEditValidationErrors([]);
+
+    try {
+      if (sourceField === "address" && editFormData.address) {
+        // Use Places API for exact coordinates (same as Test Address)
+        console.log("🔍 Places API geocoding address:", editFormData.address);
+
+        // Create Places service
+        const service = new window.google.maps.places.PlacesService(
+          document.createElement("div")
+        );
+
+        // Use findPlaceFromQuery to get exact coordinates
+        service.findPlaceFromQuery(
+          {
+            query: editFormData.address,
+            fields: ["place_id", "geometry", "formatted_address"],
+          },
+          (results, status) => {
+            if (
+              status === window.google.maps.places.PlacesServiceStatus.OK &&
+              results &&
+              results.length
+            ) {
+              const place = results[0];
+
+              // Check if geometry and location exist
+              if (!place.geometry || !place.geometry.location) {
+                toast.error("No location data found for this address");
+                return;
+              }
+
+              const lat = place.geometry.location.lat();
+              const lng = place.geometry.location.lng();
+              const address = place.formatted_address || editFormData.address;
+
+              console.log("🎯 Places API Results for Edit Address field:");
+              console.log("📍 Place ID:", place.place_id);
+              console.log("📍 Address:", address);
+              console.log("📍 Coordinates:", lat, lng);
+
+              // Update form with exact coordinates
+              setEditFormData((prev) => ({
+                ...prev,
+                latitude: lat.toString(),
+                longitude: lng.toString(),
+                address: address,
+                houseNumber: address.match(/^(\d+)/)?.[1] || "",
+              }));
+
+              toast.success(`✅ Exact coordinates found: ${lat}, ${lng}`);
+            } else {
+              console.error("❌ Places API Error:", status);
+              toast.error(`Failed to find coordinates: ${status}`);
+            }
+          }
+        );
+      } else if (
+        sourceField === "coordinates" &&
+        editFormData.latitude &&
+        editFormData.longitude
+      ) {
+        // Reverse geocode coordinates to get address
+        const lat = parseFloat(editFormData.latitude);
+        const lng = parseFloat(editFormData.longitude);
+
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const geocoder = new window.google.maps.Geocoder();
+          const result = await geocoder.geocode({
+            location: { lat, lng },
+            region: "ca",
+          });
+
+          if (result.results && result.results.length > 0) {
+            // Prefer rooftop accuracy
+            const preciseResult =
+              result.results.find(
+                (r) => r.geometry.location_type === "ROOFTOP"
+              ) || result.results[0];
+
+            const address = preciseResult.formatted_address;
+
+            // Extract the street number safely from address_components
+            const houseNumberComponent = preciseResult.address_components.find(
+              (c) => c.types.includes("street_number")
+            );
+            const houseNumber = houseNumberComponent
+              ? houseNumberComponent.long_name
+              : "";
+
+            setEditFormData((prev) => ({
+              ...prev,
+              address: address,
+              houseNumber: houseNumber,
+            }));
+          } else {
+            toast.warning(
+              "No address found for these coordinates. Try moving the pin slightly."
+            );
+          }
+        }
+      }
+
+      setEditFieldsSynchronized(true);
+    } catch (error: any) {
+      console.error("Error synchronizing edit fields:", error);
+
+      // Provide specific error messages based on the error type
+      let errorMessage = "Failed to synchronize location fields";
+      if (error?.code === "ZERO_RESULTS") {
+        errorMessage =
+          "Address not found. Please check the address or enter coordinates manually.";
+      } else if (error?.code === "OVER_QUERY_LIMIT") {
+        errorMessage =
+          "Geocoding service limit reached. Please try again later.";
+      } else if (error?.code === "REQUEST_DENIED") {
+        errorMessage = "Geocoding request denied. Please check your API key.";
+      } else if (error?.code === "INVALID_REQUEST") {
+        errorMessage = "Invalid address format. Please check your input.";
+      }
+
+      setEditValidationErrors((prev) => [...prev, errorMessage]);
+      setEditFieldsSynchronized(false);
+
+      // Show user-friendly toast message
+      toast.error(errorMessage);
+    } finally {
+      setIsEditValidating(false);
+    }
+  };
+
+  const validateEditForm = async (): Promise<boolean> => {
+    setIsEditValidating(true);
+    setEditValidationErrors([]);
+
+    const errors: string[] = [];
+
+    try {
+      // Check required fields - only house number is mandatory
+      if (!editFormData.houseNumber) errors.push("House number is required");
+
+      // Validate coordinates format (only if provided)
+      if (editFormData.latitude && editFormData.longitude) {
+        const lat = parseFloat(editFormData.latitude);
+        const lng = parseFloat(editFormData.longitude);
+
+        if (isNaN(lat) || isNaN(lng)) {
+          errors.push("Invalid coordinates format");
+        } else if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+          errors.push("Coordinates are out of valid range");
+        } else {
+          // Zone boundary validation is handled by backend
+          // Frontend only validates coordinate format and range
+          setEditCoordinatesInsideZone(true);
+        }
+      } else {
+        // If no coordinates provided, set as valid for zone check
+        setEditCoordinatesInsideZone(true);
+      }
+
+      setEditValidationErrors(errors);
+      return errors.length === 0;
+    } catch (error) {
+      console.error("Error validating edit form:", error);
+      setEditValidationErrors(["Validation error occurred"]);
+      return false;
+    } finally {
+      setIsEditValidating(false);
+    }
+  };
+
+  const isEditFormValid = (): boolean => {
+    // Basic info is required
+    const basicInfoValid =
+      editFormData.address.trim() !== "" &&
+      editFormData.houseNumber.trim() !== "" &&
+      editFormData.longitude.trim() !== "" &&
+      editFormData.latitude.trim() !== "";
+
+    // Last Visited is required ONLY when status is not "not-visited"
+    const statusValid =
+      editFormData.status === "not-visited" ||
+      (editFormData.status !== "not-visited" &&
+        editFormData.lastVisited.trim() !== "");
+
+    return basicInfoValid && statusValid;
+  };
+
+  const handleEditUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error("Geolocation is not supported by your browser");
+      return;
+    }
+
+    setIsEditGettingLocation(true);
+    toast.info("Getting your location...");
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        // Update coordinates first
+        setEditFormData((prev) => ({
+          ...prev,
+          latitude: lat.toString(),
+          longitude: lng.toString(),
+        }));
+
+        // Get address using reverse geocoding
+        try {
+          const geocoder = new window.google.maps.Geocoder();
+          const result = await geocoder.geocode({
+            location: { lat, lng },
+          });
+
+          if (result.results && result.results.length > 0) {
+            const address = result.results[0].formatted_address;
+
+            // Extract house number from address
+            const houseNumberMatch = address.match(/^(\d+)/);
+            const houseNumber = houseNumberMatch ? houseNumberMatch[1] : "";
+
+            // Update form data with address and house number
+            setEditFormData((prev) => ({
+              ...prev,
+              address: address,
+              houseNumber: houseNumber,
+            }));
+
+            toast.success(
+              `Location captured: ${lat.toFixed(6)}, ${lng.toFixed(
+                6
+              )}\nAddress: ${address}`
+            );
+          } else {
+            toast.success(
+              `Location captured: ${lat.toFixed(6)}, ${lng.toFixed(
+                6
+              )}\nAddress not found`
+            );
+          }
+        } catch (geocodeError) {
+          console.error("Geocoding error:", geocodeError);
+          toast.success(
+            `Location captured: ${lat.toFixed(6)}, ${lng.toFixed(
+              6
+            )}\nAddress lookup failed`
+          );
+        }
+
+        setIsEditGettingLocation(false);
+
+        // Trigger validation after setting location
+        setTimeout(() => validateEditForm(), 500);
+
+        // Optional: Center map on current location
+        if (mapRef.current) {
+          mapRef.current.panTo({ lat, lng });
+          mapRef.current.setZoom(18);
+        }
+      },
+      (error) => {
+        console.error("Error getting location:", error);
+        setIsEditGettingLocation(false);
+
+        if (error.code === error.PERMISSION_DENIED) {
+          toast.error(
+            "Location permission denied. Please enable location access in your browser."
+          );
+        } else if (error.code === error.POSITION_UNAVAILABLE) {
+          toast.error("Location information unavailable");
+        } else if (error.code === error.TIMEOUT) {
+          toast.error("Location request timed out");
+        } else {
+          toast.error("Failed to get your location");
+        }
+      },
+      {
+        enableHighAccuracy: true, // Use GPS for better accuracy
+        timeout: 10000, // 10 seconds timeout
+        maximumAge: 0, // Don't use cached location
+      }
+    );
+  };
+
+  const handleAddResident = async () => {
+    try {
+      setIsAddingResident(true);
+
+      // Validate required fields - only house number is mandatory
+      if (!addFormData.houseNumber) {
+        toast.error("Please enter a house number");
+        return;
+      }
+
+      const createData = {
+        zoneId: territoryId,
+        address: addFormData.address,
+        houseNumber: parseInt(addFormData.houseNumber),
+        coordinates: [
+          parseFloat(addFormData.longitude),
+          parseFloat(addFormData.latitude),
+        ],
+        status: addFormData.status,
+        lastVisited: addFormData.lastVisited || undefined,
+        notes: addFormData.notes || undefined,
+        phone: addFormData.phone || undefined,
+        email: addFormData.email || undefined,
+        ownerName: addFormData.ownerName || undefined,
+        ownerPhone: addFormData.ownerPhone || undefined,
+        ownerEmail: addFormData.ownerEmail || undefined,
+        ownerMailingAddress: addFormData.ownerMailingAddress || undefined,
+      };
+
+      console.log("🏗️ Creating resident:", createData);
+
+      const response = await apiInstance.post("/residents", createData);
+
+      console.log("✅ Create response:", response.data);
+
+      if (response.data.success) {
+        toast.success("Property added successfully!");
+
+        // Invalidate dashboard query cache
+        queryClient.invalidateQueries({ queryKey: ["myTerritories"] });
+        queryClient.invalidateQueries({
+          queryKey: ["admin", "team-performance"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["admin", "territory-stats"],
+        });
+        queryClient.invalidateQueries({
+          queryKey: ["admin", "assignment-status"],
+        });
+
+        // Add new property to local state
+        const newProperty: Property = {
+          _id: response.data.data._id,
+          address: createData.address,
+          houseNumber: createData.houseNumber,
+          coordinates: createData.coordinates as [number, number],
+          status: createData.status,
+          lastVisited: createData.lastVisited,
+          notes: createData.notes,
+          dataSource: "MANUAL",
+          lastUpdatedBy: response.data.data.lastUpdatedBy,
+        };
+
+        setProperties((prev) => [...prev, newProperty]);
+
+        // Close modal and reset form
+        handleCloseAddModal();
+      }
+    } catch (error: any) {
+      console.error("❌ Error creating resident:", error);
+
+      if (error.response?.data?.message) {
+        toast.error(error.response.data.message);
+      } else {
+        toast.error("Failed to add property");
+      }
+    } finally {
+      setIsAddingResident(false);
     }
   };
 
@@ -839,6 +1723,21 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                 <SelectItem value="not-interested">Not Interested</SelectItem>
               </SelectContent>
             </Select>
+
+            {/* Data Source Filter */}
+            <Select
+              value={dataSourceFilter}
+              onValueChange={setDataSourceFilter}
+            >
+              <SelectTrigger className="w-full text-xs sm:text-sm">
+                <SelectValue placeholder="Filter by source" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="All Sources">All Sources</SelectItem>
+                <SelectItem value="AUTO">Auto-Detected</SelectItem>
+                <SelectItem value="MANUAL">Manually Added</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Scrollable Property List */}
@@ -878,9 +1777,27 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                 <div className="flex items-start justify-between">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between mb-2">
-                      <h3 className="font-medium text-gray-900 text-sm sm:text-sm xl:text-sm leading-tight break-words flex-1 mr-2">
-                        {property.address}
-                      </h3>
+                      <div className="flex items-center gap-2 flex-1 mr-2">
+                        <h3 className="font-medium text-gray-900 text-sm sm:text-sm xl:text-sm leading-tight break-words">
+                          {property.address}
+                        </h3>
+                        {property.dataSource === "MANUAL" && (
+                          <Badge
+                            variant="secondary"
+                            className="bg-orange-100 text-orange-800 border-orange-300 text-[10px] px-1 py-0 h-4 flex-shrink-0"
+                          >
+                            Manual
+                          </Badge>
+                        )}
+                        {property.dataSource === "AUTO" && (
+                          <Badge
+                            variant="secondary"
+                            className="bg-gray-100 text-gray-600 border-gray-300 text-[10px] px-1 py-0 h-4 flex-shrink-0"
+                          >
+                            Auto
+                          </Badge>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1">
                         <div
                           className="text-[10px] flex-shrink-0 truncate px-2 py-1 rounded"
@@ -974,6 +1891,24 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
         {/* Right Side - Google Map */}
         <div className="flex-1 relative">
           {/* Map Controls */}
+          <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
+            <Button
+              variant="default"
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg"
+              onClick={handleOpenAddModal}
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Add Property
+            </Button>
+            {isAddModalOpen && (
+              <div className="bg-blue-50 border border-blue-300 text-blue-800 px-3 py-2 rounded-lg shadow-md text-xs">
+                <strong>Click on map</strong> to set coordinates
+              </div>
+            )}
+          </div>
+
+          {/* Zoom Controls */}
           <div className="absolute top-4 right-4 z-10 flex flex-col gap-2">
             <Button
               variant="outline"
@@ -1007,6 +1942,7 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
             }
             zoom={territory?.boundary?.coordinates ? undefined : 16}
             onLoad={onLoad}
+            onClick={handleMapClick}
             options={{
               disableDefaultUI: false,
               zoomControl: false,
@@ -1358,8 +2294,16 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
 
       {/* Edit Property Modal */}
       {isEditModalOpen && selectedProperty && (
-        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={handleCloseEditModal}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+          >
             {/* Header */}
             <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-lg">
               <div className="flex items-center justify-between">
@@ -1386,43 +2330,74 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                   </h3>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-gray-700">
-                      Address *
+                      Address
                     </label>
-                    <input
-                      type="text"
-                      value={editFormData.address}
-                      onChange={(e) =>
-                        handleFormChange("address", e.target.value)
-                      }
-                      disabled={isUpdatingResident}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
-                      placeholder="Enter full property address"
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={editFormData.address}
+                        onChange={(e) =>
+                          handleFormChange("address", e.target.value)
+                        }
+                        disabled={isUpdatingResident}
+                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="Enter full property address"
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 cursor-pointer disabled:cursor-not-allowed"
+                        onClick={() => findExactCoordinates("edit")}
+                        disabled={!editFormData.address || isUpdatingResident}
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      House Number
-                    </label>
-                    <input
-                      type="number"
-                      value={editFormData.houseNumber}
-                      onChange={(e) =>
-                        handleFormChange("houseNumber", e.target.value)
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Enter house number"
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        House Number
+                      </label>
+                      <input
+                        type="number"
+                        value={editFormData.houseNumber}
+                        onChange={(e) =>
+                          handleFormChange("houseNumber", e.target.value)
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="Enter house number"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        Location
+                      </label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleEditUseMyLocation}
+                        disabled={isUpdatingResident || isEditGettingLocation}
+                        className="border-blue-300 text-blue-700 hover:bg-blue-50 w-full"
+                      >
+                        <MapPin className="w-4 h-4 mr-2" />
+                        {isEditGettingLocation
+                          ? "Getting Location..."
+                          : "Use My Current Location"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-gray-700">
-                      Longitude *
+                      Longitude
                     </label>
                     <input
                       type="number"
@@ -1438,7 +2413,7 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
 
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-gray-700">
-                      Latitude *
+                      Latitude
                     </label>
                     <input
                       type="number"
@@ -1453,6 +2428,32 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                   </div>
                 </div>
               </div>
+
+              {/* Edit Validation Errors */}
+              {editValidationErrors.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <div className="text-red-800 text-sm">
+                    <div className="font-medium mb-2">
+                      Please fix the following errors:
+                    </div>
+                    <ul className="list-disc list-inside space-y-1">
+                      {editValidationErrors.map((error, index) => (
+                        <li key={index}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Edit Validation Status */}
+              {isEditValidating && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <div className="flex items-center gap-2 text-blue-800 text-sm">
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    Validating location and checking requirements...
+                  </div>
+                </div>
+              )}
 
               {/* Status & Tracking Section */}
               <div className="space-y-4 bg-green-50 p-4 rounded-lg border border-green-100">
@@ -1487,16 +2488,38 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
 
                   <div className="space-y-2">
                     <label className="text-sm font-medium text-gray-700">
-                      Last Visited
+                      Last Visited{" "}
+                      {editFormData.status !== "not-visited" && (
+                        <span className="text-red-500">*</span>
+                      )}
                     </label>
-                    <input
-                      type="date"
-                      value={editFormData.lastVisited}
-                      onChange={(e) =>
-                        handleFormChange("lastVisited", e.target.value)
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                    <div
+                      className="relative"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="date"
+                        value={editFormData.lastVisited}
+                        onChange={(e) =>
+                          handleFormChange("lastVisited", e.target.value)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onFocus={(e) => e.stopPropagation()}
+                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                        <Calendar className="w-4 h-4 text-gray-400" />
+                      </div>
+                    </div>
+                    {editFormData.status !== "not-visited" &&
+                      !editFormData.lastVisited && (
+                        <p className="text-xs text-gray-500">
+                          Required when status is not "Not Visited"
+                        </p>
+                      )}
                   </div>
                 </div>
 
@@ -1643,13 +2666,430 @@ export function TerritoryMapView({ territoryId }: TerritoryMapViewProps) {
                 </button>
                 <button
                   onClick={handleUpdateResident}
-                  disabled={isUpdatingResident}
+                  disabled={isUpdatingResident || !isEditFormValid()}
                   className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isUpdatingResident && (
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                   )}
-                  {isUpdatingResident ? "Saving..." : "Save Changes"}
+                  {isUpdatingResident
+                    ? "Saving..."
+                    : isEditValidating
+                    ? "Validating..."
+                    : "Save Changes"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Property Modal */}
+      {isAddModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          onClick={handleCloseAddModal}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onMouseUp={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 rounded-t-lg">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">
+                  Add New Property
+                </h2>
+                <button
+                  onClick={handleCloseAddModal}
+                  className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-2">
+                Use your GPS location, click on the map, or enter coordinates
+                manually
+              </p>
+            </div>
+
+            {/* Form Content */}
+            <div className="p-6 space-y-6">
+              {/* Basic Information Section */}
+              <div className="space-y-4 bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-blue-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Basic Information
+                  </h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Address
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={addFormData.address}
+                        onChange={(e) =>
+                          handleAddFormChange("address", e.target.value)
+                        }
+                        disabled={isAddingResident}
+                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="Enter full property address"
+                      />
+                      <button
+                        type="button"
+                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1 cursor-pointer disabled:cursor-not-allowed"
+                        onClick={() => findExactCoordinates("add")}
+                        disabled={!addFormData.address || isAddingResident}
+                      >
+                        <Search className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        House Number *
+                      </label>
+                      <input
+                        type="number"
+                        value={addFormData.houseNumber}
+                        onChange={(e) =>
+                          handleAddFormChange("houseNumber", e.target.value)
+                        }
+                        disabled={isAddingResident}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                        placeholder="Enter house number"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-gray-700">
+                        Location
+                      </label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleUseMyLocation}
+                        disabled={isAddingResident || isGettingLocation}
+                        className="border-blue-300 text-blue-700 hover:bg-blue-50 w-full"
+                      >
+                        <MapPin className="w-4 h-4 mr-2" />
+                        {isGettingLocation
+                          ? "Getting Location..."
+                          : "Use My Current Location"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Longitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={addFormData.longitude}
+                      onChange={(e) =>
+                        handleAddFormChange("longitude", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Click map or enter manually"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Latitude
+                    </label>
+                    <input
+                      type="number"
+                      step="any"
+                      value={addFormData.latitude}
+                      onChange={(e) =>
+                        handleAddFormChange("latitude", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Click map or enter manually"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Status & Tracking Section */}
+              <div className="space-y-4 bg-green-50 p-4 rounded-lg border border-green-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-green-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Status & Tracking
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Status *
+                    </label>
+                    <select
+                      value={addFormData.status}
+                      onChange={(e) =>
+                        handleAddFormChange("status", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <option value="not-visited">Not Visited</option>
+                      <option value="interested">Interested</option>
+                      <option value="visited">Visited</option>
+                      <option value="callback">Callback</option>
+                      <option value="appointment">Appointment</option>
+                      <option value="follow-up">Follow-up</option>
+                      <option value="not-interested">Not Interested</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Last Visited{" "}
+                      {addFormData.status !== "not-visited" && (
+                        <span className="text-red-500">*</span>
+                      )}
+                    </label>
+                    <div
+                      className="relative"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onTouchStart={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        type="date"
+                        value={addFormData.lastVisited}
+                        onChange={(e) =>
+                          handleAddFormChange("lastVisited", e.target.value)
+                        }
+                        onClick={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onFocus={(e) => e.stopPropagation()}
+                        disabled={isAddingResident}
+                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      />
+                      <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                        <Calendar className="w-4 h-4 text-gray-400" />
+                      </div>
+                    </div>
+                    {addFormData.status !== "not-visited" &&
+                      !addFormData.lastVisited && (
+                        <p className="text-xs text-gray-500">
+                          Required when status is not "Not Visited"
+                        </p>
+                      )}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Notes
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={addFormData.notes}
+                    onChange={(e) =>
+                      handleAddFormChange("notes", e.target.value)
+                    }
+                    disabled={isAddingResident}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none disabled:opacity-50 disabled:cursor-not-allowed"
+                    placeholder="Enter notes about the property..."
+                  ></textarea>
+                </div>
+              </div>
+
+              {/* Contact Information Section */}
+              <div className="space-y-4 bg-purple-50 p-4 rounded-lg border border-purple-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-purple-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Contact Information
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Phone
+                    </label>
+                    <input
+                      type="tel"
+                      value={addFormData.phone}
+                      onChange={(e) =>
+                        handleAddFormChange("phone", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter phone number"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Email
+                    </label>
+                    <input
+                      type="email"
+                      value={addFormData.email}
+                      onChange={(e) =>
+                        handleAddFormChange("email", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter email address"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Owner Information Section */}
+              <div className="space-y-4 bg-orange-50 p-4 rounded-lg border border-orange-100">
+                <div className="flex items-center gap-2">
+                  <div className="w-1 h-6 bg-orange-500 rounded-full"></div>
+                  <h3 className="text-lg font-medium text-gray-900">
+                    Owner Information
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Owner Name
+                    </label>
+                    <input
+                      type="text"
+                      value={addFormData.ownerName}
+                      onChange={(e) =>
+                        handleAddFormChange("ownerName", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter owner name"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Owner Phone
+                    </label>
+                    <input
+                      type="tel"
+                      value={addFormData.ownerPhone}
+                      onChange={(e) =>
+                        handleAddFormChange("ownerPhone", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter owner phone"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Owner Email
+                    </label>
+                    <input
+                      type="email"
+                      value={addFormData.ownerEmail}
+                      onChange={(e) =>
+                        handleAddFormChange("ownerEmail", e.target.value)
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter owner email"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">
+                      Owner Mailing Address
+                    </label>
+                    <input
+                      type="text"
+                      value={addFormData.ownerMailingAddress}
+                      onChange={(e) =>
+                        handleAddFormChange(
+                          "ownerMailingAddress",
+                          e.target.value
+                        )
+                      }
+                      disabled={isAddingResident}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 disabled:cursor-not-allowed"
+                      placeholder="Enter owner mailing address"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Validation Errors */}
+            {validationErrors.length > 0 && (
+              <div className="px-6 py-3 bg-red-50 border-t border-red-200">
+                <div className="text-red-800 text-sm">
+                  <div className="font-medium mb-2">
+                    Please fix the following errors:
+                  </div>
+                  <ul className="list-disc list-inside space-y-1">
+                    {validationErrors.map((error, index) => (
+                      <li key={index}>{error}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+
+            {/* Validation Status */}
+            {isValidating && (
+              <div className="px-6 py-3 bg-blue-50 border-t border-blue-200">
+                <div className="flex items-center gap-2 text-blue-800 text-sm">
+                  <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  Validating location and checking requirements...
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-white border-t border-gray-200 px-6 py-4 rounded-b-lg">
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={handleCloseAddModal}
+                  disabled={isAddingResident}
+                  className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddResident}
+                  disabled={isAddingResident || !isFormValid()}
+                  className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isAddingResident && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  )}
+                  {isAddingResident
+                    ? "Adding..."
+                    : isValidating
+                    ? "Validating..."
+                    : "Add Property"}
                 </button>
               </div>
             </div>

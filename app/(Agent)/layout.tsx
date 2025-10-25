@@ -1,20 +1,18 @@
-"use client"
+"use client";
 
-import { RoleAwareHeader } from "@/components/role-aware-header"
-import { RoleAwareNavigation } from "@/components/role-aware-navigation"
+import { RoleAwareHeader } from "@/components/role-aware-header";
+import { RoleAwareNavigation } from "@/components/role-aware-navigation";
 
 export default function UserLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <div className="min-h-screen bg-gray-50">
       <RoleAwareHeader />
       <RoleAwareNavigation />
-      <main className="p-6">
-        {children}
-      </main>
+      <main>{children}</main>
     </div>
-  )
+  );
 }

@@ -6,8 +6,8 @@ import {
   DrawingManager,
   Marker,
   Polygon,
-  useJsApiLoader,
 } from "@react-google-maps/api";
+import { useGoogleMaps } from "@/components/google-maps-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -29,12 +29,6 @@ import {
 import { apiInstance } from "@/lib/apiInstance";
 import { toast } from "sonner";
 
-const libraries: ("drawing" | "geometry" | "places")[] = [
-  "drawing",
-  "geometry",
-  "places",
-];
-
 interface TerritoryEditMapProps {
   territory: {
     _id: string;
@@ -52,6 +46,8 @@ interface TerritoryEditMapProps {
   isEditingBoundary?: boolean;
   onBoundaryUpdate?: (newBoundary: any) => void;
   onApplyDrawnBoundary?: () => void;
+  onCancelDrawing?: () => void;
+  overlapCheckEndpoint?: string;
 }
 
 export function TerritoryEditMap({
@@ -63,6 +59,8 @@ export function TerritoryEditMap({
   isEditingBoundary,
   onBoundaryUpdate,
   onApplyDrawnBoundary,
+  onCancelDrawing,
+  overlapCheckEndpoint = "/zones/check-overlap",
 }: TerritoryEditMapProps) {
   const [mapViewType, setMapViewType] = useState<
     "roadmap" | "satellite" | "hybrid" | "terrain"
@@ -94,11 +92,7 @@ export function TerritoryEditMap({
   const [drawnBoundary, setDrawnBoundary] = useState<any>(null);
   const [isMapInitiallyLoaded, setIsMapInitiallyLoaded] = useState(false);
 
-  const { isLoaded, loadError } = useJsApiLoader({
-    id: "google-map-script",
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "",
-    libraries,
-  });
+  const { isLoaded, loadError } = useGoogleMaps();
 
   // Fetch existing territories
   useEffect(() => {
@@ -360,7 +354,7 @@ export function TerritoryEditMap({
           }
         }
 
-        const response = await apiInstance.post("/zones/check-overlap", {
+        const response = await apiInstance.post(overlapCheckEndpoint, {
           boundary: {
             type: "Polygon",
             coordinates: [polygonCoords],
@@ -379,7 +373,7 @@ export function TerritoryEditMap({
         return null;
       }
     },
-    [territory?._id]
+    [territory?._id, overlapCheckEndpoint]
   );
 
   // Validate territory before proceeding
@@ -981,6 +975,10 @@ export function TerritoryEditMap({
                   }
                   if (onBoundaryUpdate) {
                     onBoundaryUpdate(null); // Cancel the edit
+                  }
+                  // Call the cancel drawing handler
+                  if (onCancelDrawing) {
+                    onCancelDrawing();
                   }
                 }}
               >

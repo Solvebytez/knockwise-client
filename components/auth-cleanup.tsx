@@ -1,23 +1,23 @@
-"use client"
+"use client";
 
-import { useEffect } from 'react'
-import { useAuthStore } from '@/store/userStore'
+import { useEffect } from "react";
+import { useAuthStore } from "@/store/userStore";
 
 export function AuthCleanup() {
-  const { clearAllAuthData } = useAuthStore()
+  const { clearAllAuthData } = useAuthStore();
 
   useEffect(() => {
     // Check if we need to clear auth data
-    const clearAuthHeader = document.querySelector('meta[name="x-clear-auth"]')
-    
+    const clearAuthHeader = document.querySelector('meta[name="x-clear-auth"]');
+
     if (clearAuthHeader) {
       // Clear all auth data using the store function
-      clearAllAuthData()
-      
-      // Remove the meta tag
-      clearAuthHeader.remove()
-    }
-  }, [clearAllAuthData])
+      clearAllAuthData();
 
-  return null // This component doesn't render anything
+      // Remove the meta tag
+      clearAuthHeader.remove();
+    }
+  }, []); // Removed clearAllAuthData from dependencies
+
+  return null; // This component doesn't render anything
 }

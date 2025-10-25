@@ -1,36 +1,58 @@
-"use client"
+"use client";
 
-import React from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { 
-  MapPin, 
-  Target, 
-  TrendingUp, 
+import React from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  MapPin,
+  Target,
+  TrendingUp,
   Calendar,
   Clock,
   CheckCircle,
   AlertCircle,
   Users,
   Building2,
-  Route
-} from "lucide-react"
-import { useAuthStore } from "@/store/userStore"
+  Route,
+} from "lucide-react";
+import { useAuthStore } from "@/store/userStore";
+import { useRouter } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
+import { apiInstance } from "@/lib/apiInstance";
 
 export default function AgentDashboard() {
-  const { user } = useAuthStore()
+  const { user } = useAuthStore();
+  const router = useRouter();
 
-  // Mock data for agent dashboard
+  // Fetch real territory data
+  const { data: territoriesData } = useQuery({
+    queryKey: ["myTerritories"],
+    queryFn: async () => {
+      const response = await apiInstance.get("/users/my-territories");
+      return response.data;
+    },
+    refetchOnWindowFocus: false,
+  });
+
+  const territories = territoriesData?.data?.territories || [];
+
+  // Calculate stats from real data
   const agentStats = {
-    todayTasks: 12,
-    completedTasks: 8,
-    pendingTasks: 4,
-    performance: 85,
-    territories: 3,
-    teamMembers: 5,
-    routes: 2
-  }
+    todayTasks: 12, // Keep mock for now
+    completedTasks: 8, // Keep mock for now
+    pendingTasks: 4, // Keep mock for now
+    performance: 85, // Keep mock for now
+    territories: territories.length,
+    teamMembers: 5, // Keep mock for now
+    routes: 2, // Keep mock for now
+  };
 
   const recentActivities = [
     {
@@ -39,7 +61,7 @@ export default function AgentDashboard() {
       title: "Completed territory visit",
       description: "Finished knocking on 25 houses in Downtown District",
       time: "2 hours ago",
-      status: "completed"
+      status: "completed",
     },
     {
       id: 2,
@@ -47,7 +69,7 @@ export default function AgentDashboard() {
       title: "New territory assigned",
       description: "Assigned to Westside Residential Area",
       time: "4 hours ago",
-      status: "pending"
+      status: "pending",
     },
     {
       id: 3,
@@ -55,9 +77,9 @@ export default function AgentDashboard() {
       title: "Route optimized",
       description: "New optimized route available for tomorrow",
       time: "6 hours ago",
-      status: "completed"
-    }
-  ]
+      status: "completed",
+    },
+  ];
 
   const upcomingTasks = [
     {
@@ -65,16 +87,16 @@ export default function AgentDashboard() {
       title: "Downtown District Visit",
       time: "9:00 AM - 12:00 PM",
       houses: 30,
-      priority: "high"
+      priority: "high",
     },
     {
       id: 2,
       title: "Westside Residential Area",
       time: "2:00 PM - 5:00 PM",
       houses: 25,
-      priority: "medium"
-    }
-  ]
+      priority: "medium",
+    },
+  ];
 
   return (
     <div className="p-6 space-y-6">
@@ -82,7 +104,7 @@ export default function AgentDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">
-            Welcome back, {user?.name || 'Agent'}!
+            Welcome back, {user?.name || "Agent"}!
           </h1>
           <p className="text-gray-600 mt-1">
             Here's your daily overview and tasks
@@ -94,11 +116,11 @@ export default function AgentDashboard() {
             Active
           </Badge>
           <span className="text-sm text-gray-500">
-            {new Date().toLocaleDateString('en-US', { 
-              weekday: 'long', 
-              year: 'numeric', 
-              month: 'long', 
-              day: 'numeric' 
+            {new Date().toLocaleDateString("en-US", {
+              weekday: "long",
+              year: "numeric",
+              month: "long",
+              day: "numeric",
             })}
           </span>
         </div>
@@ -114,7 +136,8 @@ export default function AgentDashboard() {
           <CardContent>
             <div className="text-2xl font-bold">{agentStats.todayTasks}</div>
             <p className="text-xs text-muted-foreground">
-              {agentStats.completedTasks} completed, {agentStats.pendingTasks} pending
+              {agentStats.completedTasks} completed, {agentStats.pendingTasks}{" "}
+              pending
             </p>
           </CardContent>
         </Card>
@@ -134,7 +157,9 @@ export default function AgentDashboard() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Territories</CardTitle>
+            <CardTitle className="text-sm font-medium">
+              Active Territories
+            </CardTitle>
             <MapPin className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -175,11 +200,18 @@ export default function AgentDashboard() {
             </CardHeader>
             <CardContent className="space-y-4">
               {upcomingTasks.map((task) => (
-                <div key={task.id} className="flex items-center justify-between p-4 border rounded-lg">
+                <div
+                  key={task.id}
+                  className="flex items-center justify-between p-4 border rounded-lg"
+                >
                   <div className="flex items-center space-x-3">
-                    <div className={`w-3 h-3 rounded-full ${
-                      task.priority === 'high' ? 'bg-red-500' : 'bg-yellow-500'
-                    }`} />
+                    <div
+                      className={`w-3 h-3 rounded-full ${
+                        task.priority === "high"
+                          ? "bg-red-500"
+                          : "bg-yellow-500"
+                      }`}
+                    />
                     <div>
                       <h4 className="font-medium">{task.title}</h4>
                       <p className="text-sm text-gray-500 flex items-center">
@@ -211,12 +243,18 @@ export default function AgentDashboard() {
           <CardContent className="space-y-4">
             {recentActivities.map((activity) => (
               <div key={activity.id} className="flex items-start space-x-3">
-                <div className={`w-2 h-2 rounded-full mt-2 ${
-                  activity.status === 'completed' ? 'bg-green-500' : 'bg-blue-500'
-                }`} />
+                <div
+                  className={`w-2 h-2 rounded-full mt-2 ${
+                    activity.status === "completed"
+                      ? "bg-green-500"
+                      : "bg-blue-500"
+                  }`}
+                />
                 <div className="flex-1">
                   <h4 className="text-sm font-medium">{activity.title}</h4>
-                  <p className="text-xs text-gray-500">{activity.description}</p>
+                  <p className="text-xs text-gray-500">
+                    {activity.description}
+                  </p>
                   <p className="text-xs text-gray-400 mt-1">{activity.time}</p>
                 </div>
               </div>
@@ -229,25 +267,36 @@ export default function AgentDashboard() {
       <Card>
         <CardHeader>
           <CardTitle>Quick Actions</CardTitle>
-          <CardDescription>
-            Access your most used features
-          </CardDescription>
+          <CardDescription>Access your most used features</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Button variant="outline" className="h-20 flex flex-col items-center justify-center space-y-2">
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col items-center justify-center space-y-2"
+            >
               <MapPin className="w-6 h-6" />
               <span className="text-sm">View Map</span>
             </Button>
-            <Button variant="outline" className="h-20 flex flex-col items-center justify-center space-y-2">
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col items-center justify-center space-y-2"
+            >
               <Route className="w-6 h-6" />
               <span className="text-sm">My Routes</span>
             </Button>
-            <Button variant="outline" className="h-20 flex flex-col items-center justify-center space-y-2">
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col items-center justify-center space-y-2"
+              onClick={() => router.push("/my-territories")}
+            >
               <Building2 className="w-6 h-6" />
-              <span className="text-sm">Territories</span>
+              <span className="text-sm">My Territories</span>
             </Button>
-            <Button variant="outline" className="h-20 flex flex-col items-center justify-center space-y-2">
+            <Button
+              variant="outline"
+              className="h-20 flex flex-col items-center justify-center space-y-2"
+            >
               <Users className="w-6 h-6" />
               <span className="text-sm">Team Info</span>
             </Button>
@@ -255,5 +304,5 @@ export default function AgentDashboard() {
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }
