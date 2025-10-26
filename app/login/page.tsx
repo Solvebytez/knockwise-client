@@ -56,6 +56,8 @@ export default function LoginPage() {
       );
       const response = await apiInstance.post("/auth/login", data);
       console.log("response.data", response.data);
+      console.log("response.headers", response.headers);
+      console.log("Cookies in response:", response.headers["set-cookie"]);
       return response.data;
     },
     onSuccess: (data: any) => {
