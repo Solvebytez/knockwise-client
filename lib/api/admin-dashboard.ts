@@ -91,6 +91,10 @@ export interface UserManagementStats {
   agentsThisMonth: number;
   agentsWithTeams: number;
   agentsWithoutTeams: number;
+  agentsWithIndividualOnlyAssignments: number;
+  agentsWithNoAssignments: number;
+  agentsWithTeamAssignments: number;
+  agentsWithBothAssignments: number;
 }
 
 // API Service Functions
