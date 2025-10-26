@@ -938,8 +938,13 @@ export function AgentTerritoryMap() {
     setWorkflowStep("drawing");
 
     toast.success(
-      `Zone "${territoryName.trim()}" created and assigned to ${communityName}. Now assign to team or agent.`
+      `Zone "${territoryName.trim()}" created and assigned to ${communityName}. Redirecting to My Territories...`
     );
+
+    // Redirect to My Territories page after successful creation
+    setTimeout(() => {
+      window.location.href = "/my-territories";
+    }, 2000); // 2 second delay to show success message
   };
 
   const handleResidentClick = (resident: Resident) => {

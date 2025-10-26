@@ -8,6 +8,13 @@ export { AssignmentStatusCard } from "./assignment-status-card";
 export { WorkforceManagementOverview } from "./workforce-management-overview";
 export { ChartPlaceholder } from "./chart-placeholder";
 
+// Independent Loading Components (Phase 1 Optimization)
+export { MetricsOverviewIndependent } from "./metrics-overview-independent";
+export { TeamPerformanceCardIndependent } from "./team-performance-card-independent";
+export { TerritoryStatusCardIndependent } from "./territory-status-card-independent";
+export { AssignmentStatusCardIndependent } from "./assignment-status-card-independent";
+export { WorkforceManagementOverviewIndependent } from "./workforce-management-overview-independent";
+
 // Loading and Error States
 export {
   MetricCardSkeleton,

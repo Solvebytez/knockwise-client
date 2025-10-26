@@ -80,7 +80,6 @@ export default function RoutesPage() {
   const [displayingRouteId, setDisplayingRouteId] = useState<string | null>(
     null
   );
-  const [deletingRouteId, setDeletingRouteId] = useState<string | null>(null);
 
   const handleOptimizationChange = (
     option: keyof typeof currentRoute.optimization
@@ -667,15 +666,11 @@ export default function RoutesPage() {
     // For now, we'll just delete without confirmation
     // In a real app, you'd want a proper confirmation dialog
 
-    setDeletingRouteId(routeId);
-
     try {
       await deleteRouteMutation.mutateAsync(routeId);
       toast.success("Route deleted successfully");
     } catch (error) {
       toast.error("Failed to delete route");
-    } finally {
-      setDeletingRouteId(null);
     }
   };
 
@@ -2213,9 +2208,9 @@ export default function RoutesPage() {
                             size="sm"
                             onClick={() => handleDeleteRoute(route._id)}
                             className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            disabled={deletingRouteId === route._id}
+                            disabled={deleteRouteMutation.isPending}
                           >
-                            {deletingRouteId === route._id ? (
+                            {deleteRouteMutation.isPending ? (
                               <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
                               <Trash2 className="w-4 h-4" />

@@ -198,6 +198,11 @@ function TerritoryEditContent() {
       queryClient.invalidateQueries({ queryKey: ["agentZone", territoryId] });
       queryClient.invalidateQueries({ queryKey: ["agentZones"] });
       toast.success("Territory updated successfully");
+
+      // Redirect to My Territories page after successful update
+      setTimeout(() => {
+        router.push("/my-territories");
+      }, 1500); // Small delay to show success message
     },
     onError: (error: any) => {
       toast.error(

@@ -1,25 +1,27 @@
-"use client"
+"use client";
 
-import React, { useEffect } from "react"
-import { useRouter } from "next/navigation"
-import { useForm } from "react-hook-form"
-import { AuthLayout } from "@/components/auth-layout"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { useAuthStore, type User } from "@/store/userStore"
-import { apiInstance } from "@/lib/apiInstance"
+import React, { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useForm } from "react-hook-form";
+import { AuthLayout } from "@/components/auth-layout";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useAuthStore, type User } from "@/store/userStore";
+import { apiInstance } from "@/lib/apiInstance";
 
-import { useMutation } from "@tanstack/react-query"
+import { useMutation } from "@tanstack/react-query";
 
 interface LoginFormData {
-  email: string
-  password: string
+  email: string;
+  password: string;
 }
 
 export default function LoginPage() {
-  const router = useRouter()
-  const [selectedUserType, setSelectedUserType] = React.useState<string | null>(null)
-  const { setUser } = useAuthStore()
+  const router = useRouter();
+  const [selectedUserType, setSelectedUserType] = React.useState<string | null>(
+    null
+  );
+  const { setUser } = useAuthStore();
   const {
     register,
     handleSubmit,
@@ -30,59 +32,61 @@ export default function LoginPage() {
       email: "agent@knockwise.io",
       password: "Admin@12345",
     },
-  })
+  });
 
   useEffect(() => {
-    const userType = localStorage.getItem("selectedUserType")
+    const userType = localStorage.getItem("selectedUserType");
     if (!userType) {
-      router.push("/select-user-type")
-      return
+      router.push("/select-user-type");
+      return;
     }
-    setSelectedUserType(userType)
-  }, [router])
+    setSelectedUserType(userType);
+  }, [router]);
 
   useEffect(() => {
-    setUser(null)
-  }, [setUser])
+    setUser(null);
+  }, [setUser]);
 
   const signInMutation = useMutation({
     mutationFn: async (data: any) => {
-      const response = await apiInstance.post("/auth/login", data)
-      console.log("response.data", response.data)
-      return response.data
+      const response = await apiInstance.post("/auth/login", data);
+      console.log("response.data", response.data);
+      return response.data;
     },
     onSuccess: (data: any) => {
-      console.log("data", data.data.user)
-      const userData = data.data.user as User
-      setUser(userData)
-      
+      console.log("data", data.data.user);
+      const userData = data.data.user as User;
+      setUser(userData);
+
       // Redirect based on user role
-      if (userData.role === 'AGENT') {
-        router.push("/agent")
+      if (userData.role === "AGENT") {
+        router.push("/agent");
       } else {
-        router.push("/dashboard")
+        router.push("/dashboard");
       }
     },
-  })
+  });
 
   const onSubmit = async (data: LoginFormData) => {
-    console.log('Form data being submitted:', data)
-    console.log('Selected user type:', selectedUserType)
-    
+    console.log("Form data being submitted:", data);
+    console.log("Selected user type:", selectedUserType);
+
     const submitData = {
       ...data,
       userType: selectedUserType,
-    }
-    
-    console.log('Final submit data:', submitData)
-    
+    };
+
+    console.log("Final submit data:", submitData);
+
     signInMutation.mutate(submitData, {
       onError: (error: any) => {
-        console.error('Login error:', error)
-        setError("root", { message: error.response?.data?.message || 'Login failed' })
-      }
-    })
-  }
+        console.error("Login error:", error);
+        setError("root", {
+          message: error.response?.data?.message || "Login failed",
+        });
+      },
+    });
+  };
 
   if (!selectedUserType) {
     return (
@@ -94,7 +98,7 @@ export default function LoginPage() {
           </div>
         </div>
       </AuthLayout>
-    )
+    );
   }
 
   return (
@@ -102,9 +106,12 @@ export default function LoginPage() {
       <div className="space-y-8">
         <div>
           <h1 className="text-3xl font-bold text-blue-600 mb-2">Login</h1>
-          <p className="text-gray-600">Enter your credentials to access your account</p>
+          <p className="text-gray-600">
+            Enter your credentials to access your account
+          </p>
           <p className="text-sm text-gray-500 mt-2">
-            Logging in as: <span className="font-medium">{selectedUserType}</span>
+            Logging in as:{" "}
+            <span className="font-medium">{selectedUserType}</span>
           </p>
         </div>
 
@@ -122,10 +129,16 @@ export default function LoginPage() {
                   },
                 })}
                 className={`h-12 text-base border-0 border-b-2 rounded-none focus:ring-0 bg-transparent ${
-                  errors.email ? "border-red-500 focus:border-red-500" : "border-gray-200 focus:border-blue-500"
+                  errors.email
+                    ? "border-red-500 focus:border-red-500"
+                    : "border-gray-200 focus:border-blue-500"
                 }`}
               />
-              {errors.email && <p className="text-red-500 text-sm mt-1">{errors.email.message}</p>}
+              {errors.email && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.email.message}
+                </p>
+              )}
             </div>
 
             <div>
@@ -140,10 +153,16 @@ export default function LoginPage() {
                   },
                 })}
                 className={`h-12 text-base border-0 border-b-2 rounded-none focus:ring-0 bg-transparent ${
-                  errors.password ? "border-red-500 focus:border-red-500" : "border-gray-200 focus:border-blue-500"
+                  errors.password
+                    ? "border-red-500 focus:border-red-500"
+                    : "border-gray-200 focus:border-blue-500"
                 }`}
               />
-              {errors.password && <p className="text-red-500 text-sm mt-1">{errors.password.message}</p>}
+              {errors.password && (
+                <p className="text-red-500 text-sm mt-1">
+                  {errors.password.message}
+                </p>
+              )}
             </div>
           </div>
 
@@ -154,7 +173,10 @@ export default function LoginPage() {
           )}
 
           <div className="flex justify-between items-center">
-            <button type="button" className="text-blue-500 text-sm hover:underline">
+            <button
+              type="button"
+              className="text-blue-500 text-sm hover:underline"
+            >
               Forgot Password
             </button>
 
@@ -170,20 +192,40 @@ export default function LoginPage() {
 
         {/* Test credentials info */}
         <div className="mt-8 p-4 bg-gray-50 rounded-lg">
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Test Credentials:</h3>
-          <div className="text-xs text-gray-600 space-y-1">
-            <p>
-              <strong>SuperAdmin:</strong> superadmin@knockwise.io / Admin@12345
-            </p>
-            <p>
-              <strong>SubAdmin:</strong> subadmin@knockwise.io / Admin@12345
-            </p>
-            <p>
-              <strong>SalesRep:</strong> agent@knockwise.io / Admin@12345
-            </p>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">
+            Test Credentials:
+          </h3>
+          <div className="text-xs text-gray-600 space-y-2">
+            <div>
+              <h4 className="font-medium text-gray-700 mb-1">
+                SubAdmin Users:
+              </h4>
+              <div className="space-y-1 ml-2">
+                <p>subadmin@knockwise.io / Admin@12345</p>
+                <p>jennifer.martinez@knockwise.io / Admin@12345</p>
+                <p>david.thompson@knockwise.io / Admin@12345</p>
+                <p>emily.rodriguez@knockwise.io / Admin@12345</p>
+              </div>
+            </div>
+            <div>
+              <h4 className="font-medium text-gray-700 mb-1">
+                SalesRep Users:
+              </h4>
+              <div className="space-y-1 ml-2">
+                <p>agent@knockwise.io / Admin@12345</p>
+                <p>michael.chen@knockwise.io / Agent@12345</p>
+                <p>amanda.foster@knockwise.io / Agent@12345</p>
+                <p>robert.kim@knockwise.io / Agent@12345</p>
+                <p>jessica.brown@knockwise.io / Agent@12345</p>
+                <p>christopher.lee@knockwise.io / Agent@12345</p>
+                <p>samantha.taylor@knockwise.io / Agent@12345</p>
+                <p>daniel.garcia@knockwise.io / Agent@12345</p>
+                <p>ashley.white@knockwise.io / Agent@12345</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </AuthLayout>
-  )
+  );
 }

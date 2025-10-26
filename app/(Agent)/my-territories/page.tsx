@@ -406,21 +406,58 @@ export default function MyTerritoriesPage() {
 
                     {/* Assignment Info */}
                     <div className="text-sm text-gray-600">
-                      <div className="flex items-center gap-1 mb-1">
+                      <div className="flex items-center gap-1 mb-2">
                         <MapPin className="w-3 h-3" />
                         <span className="font-medium">Assignment:</span>
                       </div>
-                      <div className="pl-4">
-                        <div>Type: {territory.assignmentType}</div>
-                        {territory.teamName && (
-                          <div>Team: {territory.teamName}</div>
-                        )}
-                        {territory.scheduledDate && (
-                          <div>
-                            Scheduled:{" "}
-                            {new Date(
-                              territory.scheduledDate
-                            ).toLocaleDateString()}
+                      <div className="space-y-2">
+                        {isTerritoryCreatedByAgent(territory) ? (
+                          <div className="flex items-center gap-2">
+                            <Badge
+                              variant="outline"
+                              className="text-xs bg-blue-50 text-blue-700 border-blue-200"
+                            >
+                              Type: individual (My self)
+                            </Badge>
+                          </div>
+                        ) : territory.assignmentType === "team" &&
+                          territory.teamName ? (
+                          <div className="flex flex-col gap-2">
+                            <Badge
+                              variant="outline"
+                              className="text-xs bg-green-50 text-green-700 border-green-200"
+                            >
+                              Type: team
+                            </Badge>
+                            <Badge
+                              variant="outline"
+                              className="text-xs bg-green-50 text-green-700 border-green-200"
+                            >
+                              Team: {territory.teamName}
+                            </Badge>
+                            {territory.scheduledDate && (
+                              <div className="text-xs text-gray-500">
+                                Scheduled:{" "}
+                                {new Date(
+                                  territory.scheduledDate
+                                ).toLocaleDateString()}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="pl-4 space-y-1">
+                            <div>Type: {territory.assignmentType}</div>
+                            {territory.teamName && (
+                              <div>Team: {territory.teamName}</div>
+                            )}
+                            {territory.scheduledDate && (
+                              <div>
+                                Scheduled:{" "}
+                                {new Date(
+                                  territory.scheduledDate
+                                ).toLocaleDateString()}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
