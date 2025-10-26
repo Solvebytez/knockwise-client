@@ -8,7 +8,7 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
-const baseURL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
+const baseURL = process.env.NODE_ENV === "production" ? "/api" : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api");
 console.log("🔗 API Instance baseURL:", baseURL);
 console.log("🔗 NEXT_PUBLIC_API_URL env var:", process.env.NEXT_PUBLIC_API_URL);
 
@@ -20,20 +20,10 @@ export const apiInstance = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor to add auth token from cookies
+// Request interceptor - cookies are sent automatically with same-origin requests
 apiInstance.interceptors.request.use(
   (config) => {
-    // Get token from cookies if available (now that they're not httpOnly)
-    if (typeof document !== "undefined") {
-      const token = document.cookie
-        .split("; ")
-        .find((row) => row.startsWith("accessToken="))
-        ?.split("=")[1];
-
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-      }
-    }
+    // Cookies are sent automatically by the browser with same-origin requests
     return config;
   },
   (error) => {
