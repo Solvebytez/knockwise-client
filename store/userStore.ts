@@ -33,25 +33,45 @@ export const useAuthStore = create<AuthStore>()(
       setUser: (user) => set({ user }),
       fetchUser: async () => {
         const currentState = get();
-        
+
         // Prevent multiple calls if we already have user data
         if (currentState.user && currentState.user.name) {
           console.log("User already exists, skipping fetchUser");
           set({ isLoading: false });
           return;
         }
-        
+
         console.log("Starting fetchUser...");
         set({ isLoading: true });
         try {
-          const { data } = await apiInstance.get("/users/my-profile", {
+          const response = await apiInstance.get("/users/my-profile", {
             withCredentials: true,
           });
-          console.log("fetchUser response:", data);
-          console.log("fetchUser successful:", data.user?.name);
+          console.log("fetchUser response status:", response.status);
+          console.log("fetchUser response data:", response.data);
           
-          if (data.user && data.user.name) {
-            set({ user: data.user, isLoading: false });
+          // Handle 304 (Not Modified) responses
+          if (response.status === 304) {
+            console.log("304 response - using cached data");
+            // For 304 responses, we need to get the user data from somewhere else
+            // or make a fresh request without cache
+            const freshResponse = await apiInstance.get("/users/my-profile", {
+              withCredentials: true,
+              headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+              }
+            });
+            console.log("Fresh response data:", freshResponse.data);
+            
+            if (freshResponse.data.user && freshResponse.data.user.name) {
+              set({ user: freshResponse.data.user, isLoading: false });
+            } else {
+              console.log("Invalid user data in fresh response");
+              set({ user: null, isLoading: false });
+            }
+          } else if (response.data.user && response.data.user.name) {
+            set({ user: response.data.user, isLoading: false });
           } else {
             console.log("Invalid user data received, redirecting to login");
             set({ user: null, isLoading: false });
@@ -104,3 +124,4 @@ export const useAuthStore = create<AuthStore>()(
     }
   )
 );
+
