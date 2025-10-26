@@ -59,8 +59,8 @@ export default function LoginPage() {
       return response.data;
     },
     onSuccess: (data: any) => {
-      console.log("data", data.data.user);
-      const userData = data.data.user as User;
+      console.log("data", data.user);
+      const userData = data.user as User;
       setUser(userData);
 
       // Redirect based on user role
@@ -87,7 +87,7 @@ export default function LoginPage() {
       onSuccess: (data: any) => {
         console.log("Login successful, redirecting...");
         console.log("Login response data:", data);
-        const userData = data.data.user as User;
+        const userData = data.user as User;
         setUser(userData);
 
         // Check cookies after login
