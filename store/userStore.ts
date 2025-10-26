@@ -41,12 +41,6 @@ export const useAuthStore = create<AuthStore>()(
           return;
         }
         
-        // Prevent multiple simultaneous calls
-        if (currentState.isLoading) {
-          console.log("Already loading, skipping fetchUser");
-          return;
-        }
-        
         console.log("Starting fetchUser...");
         set({ isLoading: true });
         try {

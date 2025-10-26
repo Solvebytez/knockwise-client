@@ -81,17 +81,26 @@ export default function LoginPage() {
     signInMutation.mutate(submitData, {
       onSuccess: (data: any) => {
         console.log("Login successful, redirecting...");
+        console.log("Login response data:", data);
         const userData = data.data.user as User;
         setUser(userData);
 
-        // Redirect based on user role
-        if (userData.role === "AGENT") {
-          console.log("Redirecting to /agent");
-          window.location.href = "/agent";
-        } else {
-          console.log("Redirecting to /dashboard");
-          window.location.href = "/dashboard";
-        }
+        // Check cookies after login
+        console.log("Cookies after login:", document.cookie);
+        
+        // Wait a moment for cookies to be set
+        setTimeout(() => {
+          console.log("Cookies after timeout:", document.cookie);
+          
+          // Redirect based on user role
+          if (userData.role === "AGENT") {
+            console.log("Redirecting to /agent");
+            window.location.href = "/agent";
+          } else {
+            console.log("Redirecting to /dashboard");
+            window.location.href = "/dashboard";
+          }
+        }, 100);
       },
       onError: (error: any) => {
         console.error("Login error:", error);
