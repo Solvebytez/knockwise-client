@@ -20,13 +20,12 @@ export function AuthInitializer() {
       return;
     }
 
-    if (!isLoading) {
-      console.log("AuthInitializer: no user found, fetching...");
-      fetchUser().catch((error) => {
-        console.log("Auth initialization failed:", error);
-        // This is expected for unauthenticated users
-      });
-    }
+    // Always try to fetch user if we don't have one
+    console.log("AuthInitializer: no user found, fetching...");
+    fetchUser().catch((error) => {
+      console.log("Auth initialization failed:", error);
+      // This is expected for unauthenticated users
+    });
 
     // Set a timeout to reset loading state if it gets stuck
     const timeoutId = setTimeout(() => {
@@ -39,7 +38,7 @@ export function AuthInitializer() {
     return () => {
       clearTimeout(timeoutId);
     };
-  }, [user, isLoading, fetchUser, resetLoadingState]); // React to user and loading state changes
+  }, [user, fetchUser, resetLoadingState]); // Remove isLoading from dependencies to prevent loops
 
   return null; // This component doesn't render anything
 }
