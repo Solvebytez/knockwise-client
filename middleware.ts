@@ -145,6 +145,7 @@ export async function middleware(request: NextRequest) {
 
   // 2. Handle auth routes (redirect if already logged in)
   if (authRoutes.includes(pathname) && refreshToken) {
+    console.log("🔐 Auth route with refresh token, checking if user is logged in...");
     try {
       const apiUrl =
         process.env.NEXT_PUBLIC_API_URL ||
@@ -163,21 +164,24 @@ export async function middleware(request: NextRequest) {
         const refreshData = await response.json();
         const userRole = refreshData.data?.user?.role;
 
+        console.log("✅ Valid refresh token, user role:", userRole);
+
         if (userRole) {
           // Redirect based on user role
           if (userRole === "AGENT") {
+            console.log("🔄 Redirecting AGENT to /agent");
             return NextResponse.redirect(new URL("/agent", request.url));
           } else {
+            console.log("🔄 Redirecting ADMIN to /dashboard");
             return NextResponse.redirect(new URL("/dashboard", request.url));
           }
         }
+      } else {
+        console.log("❌ Refresh token invalid, staying on auth page");
       }
     } catch (error) {
-      const response = NextResponse.next();
-      response.cookies.delete("refreshToken");
-      response.cookies.delete("accessToken");
-      response.headers.set("x-clear-auth", "true");
-      return response;
+      console.log("❌ Error checking refresh token:", error);
+      // Don't clear cookies on error, let the user stay on login page
     }
   }
 
