@@ -87,7 +87,7 @@ export default function LoginPage() {
 
         // Check cookies after login
         console.log("Cookies after login:", document.cookie);
-        
+
         // Wait a moment for cookies to be set
         setTimeout(() => {
           console.log("Cookies after timeout:", document.cookie);
@@ -95,10 +95,10 @@ export default function LoginPage() {
           // Redirect based on user role
           if (userData.role === "AGENT") {
             console.log("Redirecting to /agent");
-            window.location.href = "/agent";
+            router.push("/agent");
           } else {
             console.log("Redirecting to /dashboard");
-            window.location.href = "/dashboard";
+            router.push("/dashboard");
           }
         }, 100);
       },
