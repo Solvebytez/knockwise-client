@@ -20,11 +20,20 @@ export const apiInstance = axios.create({
   withCredentials: true,
 });
 
-// Request interceptor - cookies are sent automatically with withCredentials: true
+// Request interceptor to add auth token from cookies
 apiInstance.interceptors.request.use(
   (config) => {
-    // Cookies are sent automatically by the browser with withCredentials: true
-    // No need to manually add Authorization header for httpOnly cookies
+    // Get token from cookies if available (now that they're not httpOnly)
+    if (typeof document !== "undefined") {
+      const token = document.cookie
+        .split("; ")
+        .find((row) => row.startsWith("accessToken="))
+        ?.split("=")[1];
+
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
     return config;
   },
   (error) => {
