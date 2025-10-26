@@ -86,9 +86,11 @@ export default function LoginPage() {
 
         // Redirect based on user role
         if (userData.role === "AGENT") {
-          router.push("/agent");
+          console.log("Redirecting to /agent");
+          window.location.href = "/agent";
         } else {
-          router.push("/dashboard");
+          console.log("Redirecting to /dashboard");
+          window.location.href = "/dashboard";
         }
       },
       onError: (error: any) => {
