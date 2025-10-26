@@ -67,13 +67,15 @@ export default function LoginPage() {
 
       // Add delay to see debugging logs before redirect
       setTimeout(() => {
+        console.log("🔍 About to redirect...");
+        console.log("🔍 User data:", userData);
         // Redirect based on user role
         if (userData.role === "AGENT") {
           window.location.href = "/agent";
         } else {
           window.location.href = "/dashboard";
         }
-      }, 2000); // 2 second delay
+      }, 3000); // 3 second delay
     },
   });
 
