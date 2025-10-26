@@ -65,12 +65,15 @@ export default function LoginPage() {
       const userData = data.user as User;
       setUser(userData);
 
-      // Redirect based on user role
-      if (userData.role === "AGENT") {
-        router.push("/agent");
-      } else {
-        router.push("/dashboard");
-      }
+      // Add delay to see debugging logs before redirect
+      setTimeout(() => {
+        // Redirect based on user role
+        if (userData.role === "AGENT") {
+          window.location.href = "/agent";
+        } else {
+          window.location.href = "/dashboard";
+        }
+      }, 2000); // 2 second delay
     },
   });
 
