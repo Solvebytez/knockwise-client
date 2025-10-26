@@ -79,6 +79,18 @@ export default function LoginPage() {
     console.log("Final submit data:", submitData);
 
     signInMutation.mutate(submitData, {
+      onSuccess: (data: any) => {
+        console.log("Login successful, redirecting...");
+        const userData = data.data.user as User;
+        setUser(userData);
+
+        // Redirect based on user role
+        if (userData.role === "AGENT") {
+          router.push("/agent");
+        } else {
+          router.push("/dashboard");
+        }
+      },
       onError: (error: any) => {
         console.error("Login error:", error);
         setError("root", {
