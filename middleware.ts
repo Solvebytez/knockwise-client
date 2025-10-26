@@ -6,10 +6,6 @@ const lastRefreshTime = new Map<string, number>();
 const REFRESH_THROTTLE_MS = 5000; // 5 seconds
 
 export async function middleware(request: NextRequest) {
-  // TEMPORARILY DISABLE MIDDLEWARE TO TEST LOGIN
-  console.log("🚫 Middleware disabled for testing");
-  return NextResponse.next();
-
   const { pathname } = request.nextUrl;
 
   // Skip middleware for static assets and API routes
