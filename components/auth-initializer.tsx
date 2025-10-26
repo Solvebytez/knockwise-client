@@ -26,17 +26,9 @@ export function AuthInitializer() {
       return;
     }
 
-    // Check if we have any cookies before attempting to fetch
-    const hasTokens =
-      typeof document !== "undefined" &&
-      (document.cookie.includes("accessToken=") ||
-        document.cookie.includes("refreshToken="));
-
-    if (!hasTokens) {
-      console.log("AuthInitializer: no tokens found, skipping fetch");
-      resetLoadingState();
-      return;
-    }
+    // For httpOnly cookies, we can't check document.cookie
+    // We need to attempt the fetch and let the API handle authentication
+    console.log("AuthInitializer: attempting to fetch user (httpOnly cookies)");
 
     // Mark that we've attempted to fetch
     hasAttemptedFetch.current = true;
