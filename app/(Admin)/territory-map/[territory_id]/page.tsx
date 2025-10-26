@@ -283,7 +283,7 @@ function TerritoryEditContent() {
     enabled: !!territoryId,
     refetchOnWindowFocus: false,
     staleTime: 0, // Always consider data stale to ensure fresh fetches
-    cacheTime: 0, // Don't cache the data to ensure fresh fetches
+    gcTime: 0, // Don't cache the data to ensure fresh fetches
   });
 
   // Update zoneLocation state when data changes
