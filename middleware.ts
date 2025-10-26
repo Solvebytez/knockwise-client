@@ -59,18 +59,17 @@ export async function middleware(request: NextRequest) {
       console.log("🔄 Attempting to refresh token and get user info...");
 
       // Refresh the token and get user info in one call
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://knockwise-backend.onrender.com/api";
-      const refreshResponse = await fetch(
-        `${apiUrl}/auth/refresh`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Cookie: `refreshToken=${refreshToken}`,
-          },
-          credentials: "include",
-        }
-      );
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL ||
+        "https://knockwise-backend.onrender.com/api";
+      const refreshResponse = await fetch(`${apiUrl}/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `refreshToken=${refreshToken}`,
+        },
+        credentials: "include",
+      });
 
       if (!refreshResponse.ok) {
         console.log("❌ Token refresh failed:", refreshResponse.status);
@@ -147,18 +146,17 @@ export async function middleware(request: NextRequest) {
   // 2. Handle auth routes (redirect if already logged in)
   if (authRoutes.includes(pathname) && refreshToken) {
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "https://knockwise-backend.onrender.com/api";
-      const response = await fetch(
-        `${apiUrl}/auth/refresh`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Cookie: `refreshToken=${refreshToken}`,
-          },
-          credentials: "include",
-        }
-      );
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL ||
+        "https://knockwise-backend.onrender.com/api";
+      const response = await fetch(`${apiUrl}/auth/refresh`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Cookie: `refreshToken=${refreshToken}`,
+        },
+        credentials: "include",
+      });
 
       if (response.ok) {
         // Get user role from refresh response
