@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -130,10 +130,14 @@ export function TeamSettings() {
   const { data: currentSettings, isLoading, error, refetch } = useQuery({
     queryKey: ['team-settings'],
     queryFn: fetchTeamSettings,
-    onSuccess: (data) => {
-      setSettings(data)
-    }
   })
+
+  // Handle data updates with useEffect
+  useEffect(() => {
+    if (currentSettings) {
+      setSettings(currentSettings)
+    }
+  }, [currentSettings])
 
   const updateSettingsMutation = useMutation({
     mutationFn: updateTeamSettings,
