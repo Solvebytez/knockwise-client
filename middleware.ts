@@ -69,7 +69,7 @@ export async function middleware(request: NextRequest) {
     try {
       // Throttle refresh calls to prevent excessive requests
       const now = Date.now();
-      const lastRefresh = lastRefreshTime.get(refreshToken) || 0;
+      const lastRefresh = refreshToken ? lastRefreshTime.get(refreshToken) || 0 : 0;
 
       if (now - lastRefresh < REFRESH_THROTTLE_MS) {
         console.log("⏱️ Refresh throttled, skipping...");
