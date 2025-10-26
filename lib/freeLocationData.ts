@@ -1182,6 +1182,13 @@ export function getRegions(): FreeLocationResult[] {
 }
 
 /**
+ * Get all areas
+ */
+export function getAreas(): FreeLocationResult[] {
+  return Object.values(AREAS_BY_REGION).flat();
+}
+
+/**
  * Get areas by region
  */
 export function getAreasByRegion(regionCode: string): FreeLocationResult[] {
