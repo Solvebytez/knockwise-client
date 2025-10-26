@@ -28,7 +28,7 @@ export default function DebugGeoNamesPage() {
       console.error("Test failed:", error);
       setTestResults({
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         type: "connection",
       });
     } finally {
@@ -49,7 +49,7 @@ export default function DebugGeoNamesPage() {
       console.error("Username test failed:", error);
       setTestResults({
         success: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
         type: "usernames",
       });
     } finally {
