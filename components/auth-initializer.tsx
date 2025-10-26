@@ -20,8 +20,8 @@ export function AuthInitializer() {
       return;
     }
 
-    // Always try to fetch user if we don't have one
-    console.log("AuthInitializer: no user found, fetching...");
+    // Always try to fetch user - let the API handle authentication
+    console.log("AuthInitializer: fetching user...");
     fetchUser().catch((error) => {
       console.log("Auth initialization failed:", error);
       // This is expected for unauthenticated users
