@@ -91,7 +91,7 @@ interface AgentTerritory {
   averageKnocks: number;
 }
 
-export default function MyTerritoriesPage() {
+function MyTerritoriesPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { user } = useAuthStore();
@@ -567,3 +567,5 @@ export default function MyTerritoriesPage() {
     </div>
   );
 }
+
+export default MyTerritoriesPage;

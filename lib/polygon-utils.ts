@@ -1,9 +1,9 @@
 // @ts-ignore
-import { google } from "googlemaps"
+import { google } from "googlemaps";
 
 export interface LatLng {
-  lat: number
-  lng: number
+  lat: number;
+  lng: number;
 }
 
 /**
@@ -13,26 +13,33 @@ export interface LatLng {
  * @returns Array of residents inside the polygon
  */
 export function filterResidentsInsidePolygon(
-  residents: Array<{ id: string; lat: number; lng: number; [key: string]: any }>,
-  polygon: google.maps.Polygon | LatLng[],
+  residents: Array<{
+    id: string;
+    lat: number;
+    lng: number;
+    [key: string]: any;
+  }>,
+  polygon: google.maps.Polygon | LatLng[]
 ): Array<{ id: string; lat: number; lng: number; [key: string]: any }> {
   if (!window.google?.maps?.geometry) {
-    console.warn("Google Maps geometry library not loaded")
-    return residents
+    console.warn("Google Maps geometry library not loaded");
+    return residents;
   }
 
   return residents.filter((resident) => {
-    const point = new google.maps.LatLng(resident.lat, resident.lng)
+    const point = new google.maps.LatLng(resident.lat, resident.lng);
 
     if (polygon instanceof google.maps.Polygon) {
-      return google.maps.geometry.poly.containsLocation(point, polygon)
+      return google.maps.geometry.poly.containsLocation(point, polygon);
     } else {
       // Convert LatLng array to Google Maps Polygon for containment check
-      const polygonPath = polygon.map((p: LatLng) => new google.maps.LatLng(p.lat, p.lng))
-      const tempPolygon = new google.maps.Polygon({ paths: polygonPath })
-      return google.maps.geometry.poly.containsLocation(point, tempPolygon)
+      const polygonPath = polygon.map(
+        (p: LatLng) => new google.maps.LatLng(p.lat, p.lng)
+      );
+      const tempPolygon = new google.maps.Polygon({ paths: polygonPath });
+      return google.maps.geometry.poly.containsLocation(point, tempPolygon);
     }
-  })
+  });
 }
 
 /**
@@ -40,17 +47,21 @@ export function filterResidentsInsidePolygon(
  * @param polygon Array of LatLng points or Google Maps Polygon
  * @returns Area in square meters
  */
-export function calculatePolygonArea(polygon: LatLng[] | google.maps.Polygon): number {
+export function calculatePolygonArea(
+  polygon: LatLng[] | google.maps.Polygon
+): number {
   if (!window.google?.maps?.geometry) {
-    console.warn("Google Maps geometry library not loaded")
-    return 0
+    console.warn("Google Maps geometry library not loaded");
+    return 0;
   }
 
   if (polygon instanceof google.maps.Polygon) {
-    return google.maps.geometry.spherical.computeArea(polygon.getPath())
+    return google.maps.geometry.spherical.computeArea(polygon.getPath());
   } else {
-    const path = polygon.map((p: LatLng) => new google.maps.LatLng(p.lat, p.lng))
-    return google.maps.geometry.spherical.computeArea(path)
+    const path = polygon.map(
+      (p: LatLng) => new google.maps.LatLng(p.lat, p.lng)
+    );
+    return google.maps.geometry.spherical.computeArea(path);
   }
 }
 
@@ -61,19 +72,19 @@ export function calculatePolygonArea(polygon: LatLng[] | google.maps.Polygon): n
  */
 export function getPolygonCenter(polygon: LatLng[]): LatLng {
   if (polygon.length === 0) {
-    return { lat: 0, lng: 0 }
+    return { lat: 0, lng: 0 };
   }
 
-  const bounds = new google.maps.LatLngBounds()
+  const bounds = new google.maps.LatLngBounds();
   polygon.forEach((point) => {
-    bounds.extend(new google.maps.LatLng(point.lat, point.lng))
-  })
+    bounds.extend(new google.maps.LatLng(point.lat, point.lng));
+  });
 
-  const center = bounds.getCenter()
+  const center = bounds.getCenter();
   return {
     lat: center.lat(),
     lng: center.lng(),
-  }
+  };
 }
 
 /**
@@ -82,7 +93,7 @@ export function getPolygonCenter(polygon: LatLng[]): LatLng {
  * @returns Boolean indicating if polygon is valid
  */
 export function isValidPolygon(polygon: LatLng[]): boolean {
-  return polygon.length >= 3
+  return polygon.length >= 3;
 }
 
 /**
@@ -91,16 +102,16 @@ export function isValidPolygon(polygon: LatLng[]): boolean {
  * @returns Array of LatLng points
  */
 export function polygonToLatLngArray(polygon: google.maps.Polygon): LatLng[] {
-  const path = polygon.getPath()
-  const points: LatLng[] = []
+  const path = polygon.getPath();
+  const points: LatLng[] = [];
 
   for (let i = 0; i < path.getLength(); i++) {
-    const point = path.getAt(i)
+    const point = path.getAt(i);
     points.push({
       lat: point.lat(),
       lng: point.lng(),
-    })
+    });
   }
 
-  return points
+  return points;
 }

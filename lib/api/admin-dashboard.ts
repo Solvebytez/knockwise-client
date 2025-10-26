@@ -301,7 +301,8 @@ export const adminDashboardApi = {
       agentsThisMonth,
       agentsWithTeams: teamStats.agentsWithTeamAssignments,
       agentsWithoutTeams: teamStats.agentsWithIndividualOnlyAssignments,
-      agentsWithIndividualOnlyAssignments: teamStats.agentsWithIndividualOnlyAssignments,
+      agentsWithIndividualOnlyAssignments:
+        teamStats.agentsWithIndividualOnlyAssignments,
       agentsWithNoAssignments: teamStats.agentsWithNoAssignments,
       agentsWithTeamAssignments: teamStats.agentsWithTeamAssignments,
       agentsWithBothAssignments: teamStats.agentsWithBothAssignments,

@@ -1,17 +1,17 @@
 // @ts-ignore
-import type * as google from "google.maps"
+import type * as google from "google.maps";
 
 export interface Resident {
-  id: string
-  name: string
-  address: string
-  lat: number
-  lng: number
-  status: ResidentStatus
-  lastVisited?: Date
-  notes?: string
-  phone?: string
-  email?: string
+  id: string;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  status: ResidentStatus;
+  lastVisited?: Date;
+  notes?: string;
+  phone?: string;
+  email?: string;
 }
 
 export type ResidentStatus =
@@ -21,25 +21,25 @@ export type ResidentStatus =
   | "callback"
   | "appointment"
   | "follow-up"
-  | "not-interested"
+  | "not-interested";
 
-export type TerritoryStatus = "draft" | "assigned" | "active" | "inactive"
+export type TerritoryStatus = "draft" | "assigned" | "active" | "inactive";
 
 export interface Territory {
-  id: string
-  name: string
-  polygon: google.maps.LatLngLiteral[]
-  description?: string
-  status: TerritoryStatus
-  assignedTo?: string
-  assignedDate?: Date
-  residents: string[]
-  createdAt: Date
-  updatedAt: Date
+  id: string;
+  name: string;
+  polygon: google.maps.LatLngLiteral[];
+  description?: string;
+  status: TerritoryStatus;
+  assignedTo?: string;
+  assignedDate?: Date;
+  residents: string[];
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface MapSettings {
-  center: google.maps.LatLngLiteral
-  zoom: number
-  mapType: "roadmap" | "satellite" | "hybrid" | "terrain"
+  center: google.maps.LatLngLiteral;
+  zoom: number;
+  mapType: "roadmap" | "satellite" | "hybrid" | "terrain";
 }
