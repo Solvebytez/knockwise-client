@@ -36,8 +36,8 @@ export function AuthInitializer() {
     console.log("AuthInitializer: fetching user...");
     fetchUser().catch((error) => {
       console.log("Auth initialization failed:", error);
-      // Reset the flag so we can try again later if needed
-      hasAttemptedFetch.current = false;
+      // Don't reset the flag - we only want to try once
+      // This prevents infinite loops on authentication failure
     });
 
     // Set a timeout to reset loading state if it gets stuck
@@ -45,7 +45,7 @@ export function AuthInitializer() {
       if (isLoading && !user) {
         console.log("AuthInitializer: loading state stuck, resetting...");
         resetLoadingState();
-        hasAttemptedFetch.current = false;
+        // Don't reset hasAttemptedFetch - we only want to try once
       }
     }, 10000); // 10 second timeout
 
