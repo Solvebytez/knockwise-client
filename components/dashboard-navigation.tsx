@@ -1,28 +1,32 @@
-"use client"
+"use client";
 
-import { cn } from "@/lib/utils"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { cn } from "@/lib/utils";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 const navigationItems = [
   { id: "home", label: "Home", href: "/dashboard" },
   { id: "territory", label: "Territory Management", href: "/territory-map" },
-  { id: "routes", label: "Routes", href: "/routes" },
+  { id: "auto-zone", label: "Auto Zone Creation", href: "/auto-zone-creation" },
   { id: "team", label: "Create Team/Member", href: "/create-team" },
-]
+];
 
 export function DashboardNavigation() {
-  const pathname = usePathname()
+  const pathname = usePathname();
 
   const getActiveTab = () => {
-    if (pathname === "/dashboard") return "home"
-    if (pathname.includes("/territory-map") || pathname.includes("/create-and-assign-zone")) return "territory"
-    if (pathname.includes("/routes")) return "routes"
-    if (pathname.includes("/create-team")) return "team"
-    return "home"
-  }
+    if (pathname === "/dashboard") return "home";
+    if (
+      pathname.includes("/territory-map") ||
+      pathname.includes("/create-and-assign-zone")
+    )
+      return "territory";
+    if (pathname.includes("/auto-zone-creation")) return "auto-zone";
+    if (pathname.includes("/create-team")) return "team";
+    return "home";
+  };
 
-  const activeTab = getActiveTab()
+  const activeTab = getActiveTab();
 
   return (
     <nav className="border-b border-gray-200 bg-white">
@@ -37,7 +41,7 @@ export function DashboardNavigation() {
                 "focus:outline-none focus:ring-0",
                 activeTab === item.id
                   ? "border-[#42A5F5] text-[#42A5F5]"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300",
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               )}
             >
               {item.label}
@@ -46,5 +50,5 @@ export function DashboardNavigation() {
         </div>
       </div>
     </nav>
-  )
+  );
 }

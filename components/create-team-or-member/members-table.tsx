@@ -39,6 +39,7 @@ interface Member {
   username?: string
   role: 'SUPERADMIN' | 'SUBADMIN' | 'AGENT'
   status: 'ACTIVE' | 'INACTIVE'
+  assignmentStatus?: 'ASSIGNED' | 'UNASSIGNED'
   primaryTeamId?: {
     _id: string
     name: string
@@ -58,6 +59,13 @@ interface Member {
   }>
   teamIds: string[]
   zoneIds: string[]
+  teamMemberships?: Array<{
+    teamId: string
+    teamName: string
+    teamStatus: string
+    teamAssignmentStatus: string
+    isPrimary: boolean
+  }>
   createdBy?: {
     _id: string
     name: string
@@ -83,7 +91,7 @@ interface DetailedMember extends Member {
 
 const fetchMembers = async (): Promise<Member[]> => {
   try {
-    const response = await apiInstance.get('/users/my-created-agents')
+    const response = await apiInstance.get('/users/my-created-agents?status=all&includeTeamInfo=true')
     console.log('API Response:', response.data)
     return response.data.data || []
   } catch (error) {
@@ -118,7 +126,7 @@ export function MembersTable() {
   const [searchTerm, setSearchTerm] = useState('')
   const [territoryFilter, setTerritoryFilter] = useState('all')
   const [teamFilter, setTeamFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [combinedStatusFilter, setCombinedStatusFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [selectedMember, setSelectedMember] = useState<DetailedMember | null>(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
@@ -140,7 +148,17 @@ export function MembersTable() {
 
   const { data: members = [], isLoading, error } = useQuery({
     queryKey: ['members'],
-    queryFn: fetchMembers
+    queryFn: fetchMembers,
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    gcTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
+    retry: (failureCount, error: any) => {
+      // Don't retry on 429 errors
+      if (error?.response?.status === 429) {
+        return false;
+      }
+      return failureCount < 2;
+    }
   })
 
   // Fetch detailed member information
@@ -309,8 +327,18 @@ export function MembersTable() {
                          member.email.toLowerCase().includes(searchTerm.toLowerCase())
     const matchesTerritory = territoryFilter === 'all' || member.primaryZoneId?.name === territoryFilter
     const matchesTeam = teamFilter === 'all' || member.primaryTeamId?.name === teamFilter
-    const matchesStatus = statusFilter === 'all' || member.status === statusFilter
-    return matchesSearch && matchesTerritory && matchesTeam && matchesStatus
+    
+    // Combined status filter logic
+    let matchesCombinedStatus = true
+    if (combinedStatusFilter !== 'all') {
+      if (combinedStatusFilter === 'ACTIVE' || combinedStatusFilter === 'INACTIVE') {
+        matchesCombinedStatus = member.status === combinedStatusFilter
+      } else if (combinedStatusFilter === 'ASSIGNED' || combinedStatusFilter === 'UNASSIGNED') {
+        matchesCombinedStatus = member.assignmentStatus === combinedStatusFilter
+      }
+    }
+    
+    return matchesSearch && matchesTerritory && matchesTeam && matchesCombinedStatus
   })
 
   // Pagination
@@ -388,17 +416,16 @@ export function MembersTable() {
                    ))}
                  </SelectContent>
                </Select>
-               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                 <SelectTrigger className="w-32 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
+               <Select value={combinedStatusFilter} onValueChange={setCombinedStatusFilter}>
+                 <SelectTrigger className="w-40 border-gray-300 focus:border-[#42A5F5] focus:ring-[#42A5F5]/20">
                    <SelectValue placeholder="All Status" />
                  </SelectTrigger>
                  <SelectContent>
                    <SelectItem value="all">All Status</SelectItem>
-                   {Array.from(new Set(members.map(member => member.status))).map(status => (
-                     <SelectItem key={status} value={status}>
-                       {status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                     </SelectItem>
-                   ))}
+                   <SelectItem value="ACTIVE">Active</SelectItem>
+                   <SelectItem value="INACTIVE">Inactive</SelectItem>
+                   <SelectItem value="ASSIGNED">Assigned</SelectItem>
+                   <SelectItem value="UNASSIGNED">Unassigned</SelectItem>
                  </SelectContent>
                </Select>
             </div>
@@ -460,9 +487,29 @@ export function MembersTable() {
                       <div className="space-y-1">
                         <div className="flex items-center text-sm">
                           <Building className="w-4 h-4 mr-2 text-blue-500" />
-                          <span className="font-medium text-gray-900">
-                            {member.primaryTeamId?.name || 'Unassigned'}
-                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {member.teamMemberships && member.teamMemberships.length > 0 ? (
+                              member.teamMemberships.map((team, index) => (
+                                <span
+                                  key={team.teamId}
+                                  className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                    team.isPrimary
+                                      ? 'bg-blue-100 text-blue-800'
+                                      : 'bg-gray-100 text-gray-700'
+                                  }`}
+                                >
+                                  {team.teamName}
+                                  {team.isPrimary && (
+                                    <span className="ml-1 text-blue-600">★</span>
+                                  )}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="font-medium text-gray-900">
+                                {member.primaryTeamId?.name || 'Unassigned'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="flex items-center text-sm">
                           <MapPin className="w-4 h-4 mr-2 text-green-500" />
@@ -473,7 +520,7 @@ export function MembersTable() {
                                     {zone.name}{index < (member.allAssignedZones?.length || 0) - 1 ? ', ' : ''}
                                   </span>
                                 ))
-                              : member.primaryZoneId?.name || member.teamZoneInfo?.name || 'Unassigned'
+                              : 'Unassigned'
                             }
                           </span>
                         </div>
@@ -488,17 +535,31 @@ export function MembersTable() {
                       </div>
                     </td>
                     <td className="py-3 px-4">
-                      <div className="flex items-center">
-                        <div className={`w-2 h-2 rounded-full mr-2 ${
-                          member.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
-                        }`}></div>
-                        <Badge className={`text-xs ${
-                          member.status === 'ACTIVE' 
-                            ? 'bg-green-100 text-green-800' 
-                            : 'bg-orange-100 text-orange-800'
-                        }`}>
-                          {member.status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                        </Badge>
+                      <div className="space-y-1">
+                        <div className="flex items-center">
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            member.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
+                          }`}></div>
+                          <Badge className={`text-xs ${
+                            member.status === 'ACTIVE' 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-orange-100 text-orange-800'
+                          }`}>
+                            {member.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center">
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            member.assignmentStatus === 'ASSIGNED' ? 'bg-blue-500' : 'bg-gray-400'
+                          }`}></div>
+                          <Badge className={`text-xs ${
+                            member.assignmentStatus === 'ASSIGNED' 
+                              ? 'bg-blue-100 text-blue-800' 
+                              : 'bg-gray-100 text-gray-800'
+                          }`}>
+                            {member.assignmentStatus === 'ASSIGNED' ? 'Assigned' : 'Unassigned'}
+                          </Badge>
+                        </div>
                       </div>
                     </td>
                     <td className="py-3 px-4">
@@ -671,6 +732,19 @@ export function MembersTable() {
                             detailedMember.status === 'ACTIVE' ? 'bg-green-500' : 'bg-orange-500'
                           }`}></div>
                           {detailedMember.status === 'ACTIVE' ? 'Active' : 'Trial'}
+                        </Badge>
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-gray-600 mb-1 block">Assignment Status</label>
+                        <Badge className={`px-3 py-1 text-sm font-medium ${
+                          detailedMember.assignmentStatus === 'ASSIGNED' 
+                            ? 'bg-blue-100 text-blue-800' 
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          <div className={`w-2 h-2 rounded-full mr-2 ${
+                            detailedMember.assignmentStatus === 'ASSIGNED' ? 'bg-blue-500' : 'bg-gray-400'
+                          }`}></div>
+                          {detailedMember.assignmentStatus === 'ASSIGNED' ? 'Assigned' : 'Unassigned'}
                         </Badge>
                       </div>
                     </div>

@@ -1,5 +1,5 @@
-@import 'tailwindcss';
-@import 'tw-animate-css';
+@import "tailwindcss";
+@import "tw-animate-css";
 
 :root {
   --background: oklch(1 0 0);
@@ -83,7 +83,7 @@
   body {
     @apply bg-background text-foreground;
   }
-  
+
   /* Line clamp utilities for text truncation */
   .line-clamp-1 {
     overflow: hidden;
@@ -91,23 +91,25 @@
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 1;
   }
-  
+
   .line-clamp-2 {
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }
-  
+
   .line-clamp-3 {
     overflow: hidden;
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
   }
-  
+
   /* Force light mode - override any dark mode classes */
-  html, body, [class*="dark"] {
+  html,
+  body,
+  [class*="dark"] {
     --background: oklch(1 0 0) !important;
     --foreground: oklch(0.145 0 0) !important;
     --card: oklch(1 0 0) !important;
@@ -136,14 +138,30 @@
     --sidebar-border: oklch(0.922 0 0) !important;
     --sidebar-ring: oklch(0.708 0 0) !important;
   }
-  
+
   /* Ensure html never gets dark class */
   html.dark {
     color-scheme: light !important;
   }
-  
+
   /* Force all elements to use light mode colors */
   .dark {
     color-scheme: light !important;
+  }
+
+  /* Fix date input calendar icon issues */
+  input[type="date"]::-webkit-calendar-picker-indicator {
+    opacity: 0;
+    position: absolute;
+    right: 0;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+  }
+
+  input[type="date"]::-webkit-inner-spin-button,
+  input[type="date"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
   }
 }

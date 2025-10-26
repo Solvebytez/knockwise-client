@@ -1,7 +1,7 @@
 "use client"
 
-import { DashboardHeader } from "@/components/dashboard-header"
-import { DashboardNavigation } from "@/components/dashboard-navigation"
+import { RoleAwareHeader } from "@/components/role-aware-header"
+import { RoleAwareNavigation } from "@/components/role-aware-navigation"
 
 export default function DashboardLayout({
   children,
@@ -10,8 +10,8 @@ export default function DashboardLayout({
 }) {
   return (
     <div className="min-h-screen bg-gray-50">
-      <DashboardHeader />
-      <DashboardNavigation />
+      <RoleAwareHeader />
+      <RoleAwareNavigation />
       <main className="p-6">
         {children}
       </main>
