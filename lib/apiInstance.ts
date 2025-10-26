@@ -2,16 +2,16 @@ import axios, {
   AxiosError,
   AxiosResponse,
   InternalAxiosRequestConfig,
-} from 'axios';
+} from "axios";
 
 interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
 export const apiInstance = axios.create({
-  baseURL: 'http://localhost:4000/api',
+  baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api",
   headers: {
-    'Content-Type': 'application/json',
+    "Content-Type": "application/json",
   },
   withCredentials: true,
 });
@@ -20,12 +20,12 @@ export const apiInstance = axios.create({
 apiInstance.interceptors.request.use(
   (config) => {
     // Get token from cookies if available
-    if (typeof document !== 'undefined') {
+    if (typeof document !== "undefined") {
       const token = document.cookie
-        .split('; ')
-        .find(row => row.startsWith('accessToken='))
-        ?.split('=')[1];
-      
+        .split("; ")
+        .find((row) => row.startsWith("accessToken="))
+        ?.split("=")[1];
+
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
@@ -44,17 +44,17 @@ apiInstance.interceptors.response.use(
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
-      originalRequest.url !== '/auth/refresh'
+      originalRequest.url !== "/auth/refresh"
     ) {
       originalRequest._retry = true;
 
       try {
-        await apiInstance.post('/auth/refresh', {});
+        await apiInstance.post("/auth/refresh", {});
         return apiInstance(originalRequest);
       } catch (refreshError) {
         if ((refreshError as AxiosError).response?.status === 401) {
-          if (typeof window !== 'undefined') {
-            window.location.href = '/login';
+          if (typeof window !== "undefined") {
+            window.location.href = "/login";
           }
         }
         return Promise.reject(error);

@@ -547,7 +547,7 @@ export default function RoutesPage() {
     try {
       console.log("Testing backend connection...");
       const testResponse = await fetch(
-        "http://localhost:4000/api/routes/my?page=1&limit=1"
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'}/routes/my?page=1&limit=1`
       );
       console.log("Backend test response:", testResponse.status);
     } catch (error) {
@@ -1028,7 +1028,7 @@ export default function RoutesPage() {
     try {
       console.log("Testing backend connection...");
       const testResponse = await fetch(
-        "http://localhost:4000/api/routes/my?page=1&limit=1"
+        `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api'}/routes/my?page=1&limit=1`
       );
       console.log("Backend test response:", testResponse.status);
     } catch (error) {
