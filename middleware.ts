@@ -25,6 +25,7 @@ export async function middleware(request: NextRequest) {
   console.log("  pathname:", pathname);
   console.log("  accessToken:", accessToken ? "✅ Present" : "❌ Missing");
   console.log("  refreshToken:", refreshToken ? "✅ Present" : "❌ Missing");
+  console.log("  All cookies:", request.cookies.getAll().map(c => `${c.name}=${c.value.substring(0, 20)}...`));
 
   // Define protected routes that require authentication
   const protectedRoutes = [
