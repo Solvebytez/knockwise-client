@@ -69,14 +69,16 @@ export async function middleware(request: NextRequest) {
     try {
       // Throttle refresh calls to prevent excessive requests
       const now = Date.now();
-      const lastRefresh = refreshToken ? lastRefreshTime.get(refreshToken) || 0 : 0;
+      const lastRefresh = refreshToken
+        ? lastRefreshTime.get(refreshToken as string) ?? 0
+        : 0;
 
       if (now - lastRefresh < REFRESH_THROTTLE_MS) {
         console.log("⏱️ Refresh throttled, skipping...");
         return NextResponse.next();
       }
 
-      lastRefreshTime.set(refreshToken, now);
+      lastRefreshTime.set(refreshToken as string, now);
       console.log("🔄 Attempting to refresh token and get user info...");
 
       // Refresh the token and get user info in one call
