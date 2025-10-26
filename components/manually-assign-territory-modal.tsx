@@ -40,7 +40,7 @@ import {
   type BuildingFootprint,
   type OSMBuilding,
 } from "@/lib/osmService";
-import { overpassService, type OverpassStreet } from "@/lib/overpassService";
+import { overpassService } from "@/lib/overpassService";
 import type { ResidentialBuildingType } from "@/types/osm";
 import { GoogleMap, Marker, Polygon } from "@react-google-maps/api";
 import { useGoogleMaps } from "@/components/google-maps-provider";
