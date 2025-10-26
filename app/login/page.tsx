@@ -49,6 +49,11 @@ export default function LoginPage() {
 
   const signInMutation = useMutation({
     mutationFn: async (data: any) => {
+      console.log("🔗 API Instance baseURL:", apiInstance.defaults.baseURL);
+      console.log(
+        "🔗 Full URL will be:",
+        `${apiInstance.defaults.baseURL}/auth/login`
+      );
       const response = await apiInstance.post("/auth/login", data);
       console.log("response.data", response.data);
       return response.data;
@@ -72,8 +77,8 @@ export default function LoginPage() {
     console.log("Selected user type:", selectedUserType);
 
     const submitData = {
-      ...data,
-      userType: selectedUserType,
+      email: data.email,
+      password: data.password,
     };
 
     console.log("Final submit data:", submitData);
@@ -91,14 +96,14 @@ export default function LoginPage() {
         // Wait a moment for cookies to be set
         setTimeout(() => {
           console.log("Cookies after timeout:", document.cookie);
-          
-          // Redirect based on user role
+
+          // Redirect based on user role using window.location for stability
           if (userData.role === "AGENT") {
             console.log("Redirecting to /agent");
-            router.push("/agent");
+            window.location.replace("/agent");
           } else {
             console.log("Redirecting to /dashboard");
-            router.push("/dashboard");
+            window.location.replace("/dashboard");
           }
         }, 100);
       },

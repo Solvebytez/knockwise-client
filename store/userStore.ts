@@ -49,7 +49,7 @@ export const useAuthStore = create<AuthStore>()(
           });
           console.log("fetchUser response status:", response.status);
           console.log("fetchUser response data:", response.data);
-          
+
           // Handle 304 (Not Modified) responses
           if (response.status === 304) {
             console.log("304 response - using cached data");
@@ -58,12 +58,12 @@ export const useAuthStore = create<AuthStore>()(
             const freshResponse = await apiInstance.get("/users/my-profile", {
               withCredentials: true,
               headers: {
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-              }
+                "Cache-Control": "no-cache",
+                Pragma: "no-cache",
+              },
             });
             console.log("Fresh response data:", freshResponse.data);
-            
+
             if (freshResponse.data.user && freshResponse.data.user.name) {
               set({ user: freshResponse.data.user, isLoading: false });
             } else {
@@ -124,4 +124,3 @@ export const useAuthStore = create<AuthStore>()(
     }
   )
 );
-
