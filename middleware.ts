@@ -7,6 +7,17 @@ const REFRESH_THROTTLE_MS = 5000; // 5 seconds
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Skip middleware for static assets and API routes
+  if (
+    pathname.startsWith("/_next/") ||
+    pathname.startsWith("/api/") ||
+    pathname.includes(".") ||
+    pathname.startsWith("/favicon")
+  ) {
+    return NextResponse.next();
+  }
+
   const refreshToken = request.cookies.get("refreshToken")?.value;
   const accessToken = request.cookies.get("accessToken")?.value;
 
@@ -60,8 +71,7 @@ export async function middleware(request: NextRequest) {
 
       // Refresh the token and get user info in one call
       const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL ||
-        "https://knockwise-backend.onrender.com/api";
+        process.env.NEXT_PUBLIC_API_URL || "https://knockwise-backend.onrender.com/api";
       const refreshResponse = await fetch(`${apiUrl}/auth/refresh`, {
         method: "POST",
         headers: {
@@ -145,11 +155,12 @@ export async function middleware(request: NextRequest) {
 
   // 2. Handle auth routes (redirect if already logged in)
   if (authRoutes.includes(pathname) && refreshToken) {
-    console.log("🔐 Auth route with refresh token, checking if user is logged in...");
+    console.log(
+      "🔐 Auth route with refresh token, checking if user is logged in..."
+    );
     try {
-      const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL ||
-        "https://knockwise-backend.onrender.com/api";
+            const apiUrl =
+              process.env.NEXT_PUBLIC_API_URL || "https://knockwise-backend.onrender.com/api";
       const response = await fetch(`${apiUrl}/auth/refresh`, {
         method: "POST",
         headers: {
