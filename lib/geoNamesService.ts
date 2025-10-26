@@ -116,7 +116,7 @@ class GeoNamesService {
           population: place.population,
           type: this.getPlaceType(place.fcode),
         }))
-        .sort((a, b) => (b.population || 0) - (a.population || 0)); // Sort by population
+        .sort((a: any, b: any) => (b.population || 0) - (a.population || 0)); // Sort by population
     } catch (error) {
       console.error("GeoNames search error:", error);
       return [];
@@ -181,7 +181,7 @@ class GeoNamesService {
           population: place.population,
           type: this.getPlaceType(place.fcode),
         }))
-        .sort((a, b) => (b.population || 0) - (a.population || 0));
+        .sort((a: any, b: any) => (b.population || 0) - (a.population || 0));
     } catch (error) {
       console.error("GeoNames province search error:", error);
       return [];

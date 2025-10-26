@@ -1,3 +1,4 @@
+// @ts-ignore
 import type * as google from "google.maps"
 
 export interface Resident {

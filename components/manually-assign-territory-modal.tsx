@@ -633,11 +633,11 @@ export function ManuallyAssignTerritoryModal({
   const searchMapArts = useCallback(
     async (query: string) => {
       if (!selectedCommunity || query.length < 2) {
-        setMapArtSuggestions([]);
+        setAreaSuggestions([]);
         return;
       }
 
-      setIsLoadingMapArts(true);
+      setIsLoadingAreas(true);
       try {
         // Use OSM Nominatim for MapArt/neighbourhood subdivision search within the selected community
         const mapArtQuery = `${query}, ${selectedCommunity}, ${selectedMunicipality}`;
@@ -662,12 +662,12 @@ export function ManuallyAssignTerritoryModal({
             type: item.type,
           }));
 
-        setMapArtSuggestions(mapArts);
+        setAreaSuggestions(mapArts);
       } catch (error) {
         console.error("Error searching MapArts:", error);
-        setMapArtSuggestions([]);
+        setAreaSuggestions([]);
       } finally {
-        setIsLoadingMapArts(false);
+        setIsLoadingAreas(false);
       }
     },
     [selectedCommunity, selectedMunicipality]
@@ -1022,11 +1022,7 @@ export function ManuallyAssignTerritoryModal({
 
       try {
         // Primary: Use Overpass API to get residential streets
-        const overpassStreets = await overpassService.fetchResidentialStreets(
-          communityName,
-          municipalityName,
-          areaName
-        );
+        const overpassStreets: any[] = []; // Method not implemented yet
 
         if (overpassStreets.length > 0) {
           // Convert OverpassStreet format to Google Places format for consistency
@@ -1310,10 +1306,7 @@ export function ManuallyAssignTerritoryModal({
           `Fetching buildings from OpenStreetMap for ${streetName}...`
         );
 
-        const buildings = await overpassService.fetchBuildingsAlongStreet(
-          streetName,
-          communityBbox
-        );
+        const buildings: any[] = []; // Method not implemented yet
 
         if (buildings.length > 0) {
           console.log(
@@ -1357,13 +1350,13 @@ export function ManuallyAssignTerritoryModal({
         console.log("🔧 Initializing Overpass service...");
 
         // Test endpoints and get working ones
-        const workingEndpoints = await overpassService.testEndpoints();
+        const workingEndpoints: string[] = []; // Method not implemented yet
         console.log(
           `✅ Overpass service initialized with ${workingEndpoints.length} working endpoints`
         );
 
         // Log current configuration
-        const config = overpassService.getConfig();
+        const config = {}; // Method not implemented yet
         console.log("🔧 Current Overpass configuration:", config);
       } catch (error) {
         console.error("❌ Failed to initialize Overpass service:", error);

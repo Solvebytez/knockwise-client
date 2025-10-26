@@ -1,3 +1,4 @@
+// @ts-ignore
 import { google } from "googlemaps"
 
 export interface LatLng {
@@ -27,7 +28,7 @@ export function filterResidentsInsidePolygon(
       return google.maps.geometry.poly.containsLocation(point, polygon)
     } else {
       // Convert LatLng array to Google Maps Polygon for containment check
-      const polygonPath = polygon.map((p) => new google.maps.LatLng(p.lat, p.lng))
+      const polygonPath = polygon.map((p: LatLng) => new google.maps.LatLng(p.lat, p.lng))
       const tempPolygon = new google.maps.Polygon({ paths: polygonPath })
       return google.maps.geometry.poly.containsLocation(point, tempPolygon)
     }
@@ -48,7 +49,7 @@ export function calculatePolygonArea(polygon: LatLng[] | google.maps.Polygon): n
   if (polygon instanceof google.maps.Polygon) {
     return google.maps.geometry.spherical.computeArea(polygon.getPath())
   } else {
-    const path = polygon.map((p) => new google.maps.LatLng(p.lat, p.lng))
+    const path = polygon.map((p: LatLng) => new google.maps.LatLng(p.lat, p.lng))
     return google.maps.geometry.spherical.computeArea(path)
   }
 }

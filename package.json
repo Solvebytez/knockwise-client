@@ -51,6 +51,7 @@
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
     "geist": "latest",
+    "googlemaps": "^1.12.0",
     "immer": "latest",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
@@ -69,12 +70,14 @@
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "use-sync-external-store": "latest",
+    "vaul": "^1.1.2",
     "zod": "^3.25.67",
     "zustand": "latest"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.1",
     "@tailwindcss/postcss": "^4.1.9",
+    "@types/googlemaps": "^3.43.3",
     "@types/node": "^22.18.12",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",

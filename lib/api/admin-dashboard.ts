@@ -128,53 +128,58 @@ export const adminDashboardApi = {
     // Calculate dynamic stats from territories data (same as territory-map)
     const totalTerritories = territories.length;
     const activeTerritories = territories.filter(
-      (t) => t.status === "ACTIVE"
+      (t: any) => t.status === "ACTIVE"
     ).length;
     const scheduledTerritories = territories.filter(
-      (t) => t.status === "SCHEDULED"
+      (t: any) => t.status === "SCHEDULED"
     ).length;
     const draftTerritories = territories.filter(
-      (t) => t.status === "DRAFT"
+      (t: any) => t.status === "DRAFT"
     ).length;
     const completedTerritories = territories.filter(
-      (t) => t.status === "COMPLETED"
+      (t: any) => t.status === "COMPLETED"
     ).length;
     const assignedTerritories = territories.filter(
-      (t) => t.currentAssignment
+      (t: any) => t.currentAssignment
     ).length;
     const unassignedTerritories = totalTerritories - assignedTerritories;
 
     const totalResidents = territories.reduce(
-      (sum, t) => sum + (t.totalResidents || 0),
+      (sum: number, t: any) => sum + (t.totalResidents || 0),
       0
     );
     const activeResidents = territories.reduce(
-      (sum, t) => sum + (t.activeResidents || 0),
+      (sum: number, t: any) => sum + (t.activeResidents || 0),
       0
     );
 
     const completionRates = territories
-      .map((t) => t.completionRate || 0)
-      .filter((rate) => rate > 0);
+      .map((t: any) => t.completionRate || 0)
+      .filter((rate: number) => rate > 0);
     const averageCompletionRate =
       completionRates.length > 0
         ? Math.round(
-            completionRates.reduce((sum, rate) => sum + rate, 0) /
-              completionRates.length
+            completionRates.reduce(
+              (sum: number, rate: number) => sum + rate,
+              0
+            ) / completionRates.length
           )
         : 0;
 
     // Find top performing territory
-    const topPerformingTerritory = territories.reduce((top, current) => {
-      const currentRate = current.completionRate || 0;
-      const topRate = top?.completionRate || 0;
-      return currentRate > topRate ? current : top;
-    }, null as any);
+    const topPerformingTerritory = territories.reduce(
+      (top: any, current: any) => {
+        const currentRate = current.completionRate || 0;
+        const topRate = top?.completionRate || 0;
+        return currentRate > topRate ? current : top;
+      },
+      null as any
+    );
 
     // Calculate recent activity (territories updated in last 24 hours)
     const now = new Date();
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const recentActivity = territories.filter((territory) => {
+    const recentActivity = territories.filter((territory: any) => {
       const lastActivity = new Date(
         territory.lastActivity || territory.updatedAt
       );
@@ -184,9 +189,6 @@ export const adminDashboardApi = {
     return {
       totalTerritories,
       activeTerritories,
-      scheduledTerritories,
-      draftTerritories,
-      completedTerritories,
       assignedTerritories,
       unassignedTerritories,
       totalResidents,
@@ -299,6 +301,10 @@ export const adminDashboardApi = {
       agentsThisMonth,
       agentsWithTeams: teamStats.agentsWithTeamAssignments,
       agentsWithoutTeams: teamStats.agentsWithIndividualOnlyAssignments,
+      agentsWithIndividualOnlyAssignments: teamStats.agentsWithIndividualOnlyAssignments,
+      agentsWithNoAssignments: teamStats.agentsWithNoAssignments,
+      agentsWithTeamAssignments: teamStats.agentsWithTeamAssignments,
+      agentsWithBothAssignments: teamStats.agentsWithBothAssignments,
     };
 
     return result;

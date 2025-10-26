@@ -25,7 +25,12 @@ export async function middleware(request: NextRequest) {
   console.log("  pathname:", pathname);
   console.log("  accessToken:", accessToken ? "✅ Present" : "❌ Missing");
   console.log("  refreshToken:", refreshToken ? "✅ Present" : "❌ Missing");
-  console.log("  All cookies:", request.cookies.getAll().map(c => `${c.name}=${c.value.substring(0, 20)}...`));
+  console.log(
+    "  All cookies:",
+    request.cookies
+      .getAll()
+      .map((c) => `${c.name}=${c.value.substring(0, 20)}...`)
+  );
 
   // Define protected routes that require authentication
   const protectedRoutes = [
@@ -72,7 +77,7 @@ export async function middleware(request: NextRequest) {
 
       // Refresh the token and get user info in one call
       const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL ||
+        (process as any).env.NEXT_PUBLIC_API_URL ||
         "https://knockwise-backend.onrender.com/api";
       const refreshResponse = await fetch(`${apiUrl}/auth/refresh`, {
         method: "POST",
@@ -162,7 +167,7 @@ export async function middleware(request: NextRequest) {
     );
     try {
       const apiUrl =
-        process.env.NEXT_PUBLIC_API_URL ||
+        (process as any).env.NEXT_PUBLIC_API_URL ||
         "https://knockwise-backend.onrender.com/api";
       const response = await fetch(`${apiUrl}/auth/refresh`, {
         method: "POST",

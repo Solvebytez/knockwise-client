@@ -8,7 +8,10 @@ interface CustomAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
-const baseURL = process.env.NODE_ENV === "production" ? "/api" : (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api");
+const baseURL =
+  process.env.NODE_ENV === "production"
+    ? "/api"
+    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000/api";
 console.log("🔗 API Instance baseURL:", baseURL);
 console.log("🔗 NEXT_PUBLIC_API_URL env var:", process.env.NEXT_PUBLIC_API_URL);
 

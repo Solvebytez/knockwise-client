@@ -106,8 +106,7 @@ export function ZoneCommunityAssignmentDemo() {
         isOpen={isModalOpen}
         onClose={handleModalClose}
         onSuccess={handleAssignmentSuccess}
-        zoneId={mockZoneId}
-        zoneName={mockZoneName}
+        mode="edit"
       />
     </div>
   );
